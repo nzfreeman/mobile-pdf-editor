@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../services/app_settings.dart';
+import '../services/ota_update_service.dart';
 import '../services/recent_files_service.dart';
 import 'pdf_editor_screen.dart';
 import 'tools_screen.dart';
@@ -17,18 +18,95 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _recentService = RecentFilesService();
+  final _otaService = OtaUpdateService();
   List<RecentPdfFile> _recentFiles = [];
+  OtaUpdateState? _otaState;
   bool _busy = false;
+  bool _otaBusy = false;
 
   @override
   void initState() {
     super.initState();
     _loadRecent();
+    _checkOta(silent: true);
   }
 
   Future<void> _loadRecent() async {
     final files = await _recentService.load();
     if (mounted) setState(() => _recentFiles = files);
+  }
+
+  Future<void> _checkOta({bool silent = false}) async {
+    if (_otaBusy) return;
+    setState(() => _otaBusy = true);
+    final state = await _otaService.check();
+    if (!mounted) return;
+    setState(() {
+      _otaBusy = false;
+      _otaState = state;
+    });
+
+    if (!silent || state.status == OtaUiStatus.updateAvailable) {
+      await _showOtaDialog(state);
+    }
+  }
+
+  Future<void> _downloadOta() async {
+    if (_otaBusy) return;
+    setState(() => _otaBusy = true);
+    final state = await _otaService.download();
+    if (!mounted) return;
+    setState(() {
+      _otaBusy = false;
+      _otaState = state;
+    });
+    await _showOtaDialog(state);
+  }
+
+  String _otaTitle(OtaUpdateState state) => switch (state.status) {
+        OtaUiStatus.checking => '업데이트 확인 중',
+        OtaUiStatus.unavailable => 'OTA 업데이트 준비 필요',
+        OtaUiStatus.upToDate => '최신 버전입니다',
+        OtaUiStatus.updateAvailable => '새 업데이트 사용 가능',
+        OtaUiStatus.restartRequired => '업데이트 설치 완료',
+        OtaUiStatus.downloading => '업데이트 다운로드 중',
+        OtaUiStatus.failed => '업데이트 확인 실패',
+      };
+
+  String _otaMessage(OtaUpdateState state) {
+    if (state.message != null) return state.message!;
+    final patch = state.currentPatch == null ? '' : '현재 패치 ${state.currentPatch}번\n\n';
+    return switch (state.status) {
+      OtaUiStatus.upToDate => '${patch}사용 가능한 새 패치가 없습니다.',
+      OtaUiStatus.updateAvailable => '${patch}새 패치를 지금 내려받을 수 있습니다.',
+      OtaUiStatus.restartRequired => '${patch}앱을 완전히 종료한 뒤 다시 실행하면 업데이트가 적용됩니다.',
+      _ => patch,
+    };
+  }
+
+  Future<void> _showOtaDialog(OtaUpdateState state) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(_otaTitle(state)),
+        content: Text(_otaMessage(state)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('닫기'),
+          ),
+          if (state.status == OtaUiStatus.updateAvailable)
+            FilledButton.icon(
+              onPressed: () {
+                Navigator.pop(dialogContext);
+                _downloadOta();
+              },
+              icon: const Icon(Icons.download),
+              label: const Text('업데이트'),
+            ),
+        ],
+      ),
+    );
   }
 
   Future<void> _open(File file, String name) async {
@@ -66,12 +144,32 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) await _loadRecent();
   }
 
+  IconData get _otaIcon {
+    if (_otaBusy) return Icons.sync;
+    return switch (_otaState?.status) {
+      OtaUiStatus.updateAvailable => Icons.system_update,
+      OtaUiStatus.restartRequired => Icons.restart_alt,
+      OtaUiStatus.failed => Icons.cloud_off,
+      _ => Icons.system_update_alt,
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Mobile PDF Editor'),
         actions: [
+          IconButton(
+            tooltip: 'OTA 업데이트 확인',
+            onPressed: _otaBusy ? null : () => _checkOta(),
+            icon: _otaBusy
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(_otaIcon),
+          ),
           IconButton(
             tooltip: '테마 변경',
             onPressed: () {
@@ -134,6 +232,28 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ],
                   ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: ListTile(
+                  leading: Icon(
+                    _otaState?.status == OtaUiStatus.updateAvailable
+                        ? Icons.new_releases
+                        : Icons.system_update_alt,
+                  ),
+                  title: Text(
+                    _otaState == null ? 'OTA 업데이트' : _otaTitle(_otaState!),
+                  ),
+                  subtitle: Text(
+                    _otaState == null
+                        ? 'Shorebird 패치 상태를 확인합니다.'
+                        : _otaMessage(_otaState!).replaceAll('\n\n', ' '),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: _otaBusy ? null : () => _checkOta(),
                 ),
               ),
               const SizedBox(height: 22),
