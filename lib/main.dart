@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:pdfrx/pdfrx.dart';
+
 import 'screens/home_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  pdfrxFlutterInitialize();
   runApp(const PdfEditorApp());
 }
 
