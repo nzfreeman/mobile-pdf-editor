@@ -1,0 +1,96 @@
+name: Publish Android Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project files
+        run: flutter create . --platforms=android --org com.nzqueenbee --project-name mobile_pdf_editor
+
+      - name: Add Android permissions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text(encoding='utf-8')
+          permissions = (
+              '    <uses-permission android:name="android.permission.INTERNET" />\n'
+              '    <uses-permission android:name="android.permission.CAMERA" />\n'
+          )
+          marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          if 'android.permission.INTERNET' not in text:
+              text = text.replace(marker, marker + '\n' + permissions, 1)
+          manifest.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze source
+        run: flutter analyze
+
+      - name: Run tests when present
+        shell: bash
+        run: |
+          if [ -d test ] && find test -type f -name '*_test.dart' -print -quit | grep -q .; then
+            flutter test
+          else
+            echo 'No Flutter tests found; skipping.'
+          fi
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Build release app bundle
+        run: flutter build appbundle --release
+
+      - name: Rename release files
+        shell: bash
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk mobile-pdf-editor-${GITHUB_REF_NAME}.apk
+          cp build/app/outputs/bundle/release/app-release.aab mobile-pdf-editor-${GITHUB_REF_NAME}.aab
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-pdf-editor-${{ github.ref_name }}
+          path: |
+            mobile-pdf-editor-${{ github.ref_name }}.apk
+            mobile-pdf-editor-${{ github.ref_name }}.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            mobile-pdf-editor-${{ github.ref_name }}.apk
+            mobile-pdf-editor-${{ github.ref_name }}.aab
