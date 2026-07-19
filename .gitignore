@@ -39,3 +39,26 @@ ios/Runner/GoogleService-Info.plist
 *.tmp
 .DS_Store
 Thumbs.db
+
+
+# Environment and secrets
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+
+# Android signing
+android/key.properties
+android/local.properties
+android/app/google-services.json
+
+# iOS
+ios/Runner/GoogleService-Info.plist
+
+# OAuth / Service Accounts
+credentials.json
+client_secret*.json
+service-account*.json
