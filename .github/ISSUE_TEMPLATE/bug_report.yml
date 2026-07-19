@@ -1,0 +1,54 @@
+name: Bug report
+description: Report a reproducible problem in the app
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a problem. Do not attach private PDFs, credentials, OAuth tokens, or signing files.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Problem summary
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open...
+        2. Tap...
+        3. Observe...
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and device
+      placeholder: Android 15, Pixel 8
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: App version or commit
+      placeholder: v0.2.0 or commit SHA
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Remove personal data and secrets before pasting logs.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I removed personal documents and secrets from this report.
+          required: true
