@@ -76,3 +76,5 @@ jobs:
           path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
           retention-days: 14
+
+# Build trigger: 2026-07-19
