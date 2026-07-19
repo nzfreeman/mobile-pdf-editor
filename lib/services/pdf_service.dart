@@ -172,9 +172,11 @@ class PdfService {
     return pw.Positioned(
       left: left,
       top: top,
-      width: itemWidth,
-      height: itemHeight,
-      child: pw.Transform.rotate(angle: item.rotation, child: child),
+      child: pw.SizedBox(
+        width: itemWidth,
+        height: itemHeight,
+        child: pw.Transform.rotate(angle: item.rotation, child: child),
+      ),
     );
   }
 }
