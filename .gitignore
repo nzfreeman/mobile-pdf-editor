@@ -8,3 +8,34 @@ build/
 .vscode/
 android/.gradle/
 ios/Pods/
+
+# Environment and local configuration
+.env
+.env.*
+!.env.example
+android/local.properties
+
+# Credentials and secrets
+credentials.json
+client_secret*.json
+service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Android signing and Google services
+android/key.properties
+android/app/google-services.json
+*.jks
+*.keystore
+
+# iOS signing and Google services
+ios/Runner/GoogleService-Info.plist
+*.mobileprovision
+
+# Generated logs and temporary files
+*.log
+*.tmp
+.DS_Store
+Thumbs.db
