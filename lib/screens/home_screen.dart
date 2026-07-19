@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../services/app_settings.dart';
+import '../services/app_update_service.dart';
 import '../services/recent_files_service.dart';
 import 'pdf_editor_screen.dart';
 import 'tools_screen.dart';
@@ -17,18 +18,149 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _recentService = RecentFilesService();
+  final _updateService = AppUpdateService();
   List<RecentPdfFile> _recentFiles = [];
   bool _busy = false;
+  bool _checkingUpdate = false;
 
   @override
   void initState() {
     super.initState();
     _loadRecent();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _silentUpdateCheck());
   }
 
   Future<void> _loadRecent() async {
     final files = await _recentService.load();
     if (mounted) setState(() => _recentFiles = files);
+  }
+
+  Future<void> _silentUpdateCheck() async {
+    final state = await _updateService.check();
+    if (!mounted || state.status != AppUpdateStatus.available) return;
+    await _showUpdateSheet(initialState: state);
+  }
+
+  Future<void> _checkForUpdate() async {
+    if (_checkingUpdate) return;
+    setState(() => _checkingUpdate = true);
+    final state = await _updateService.check();
+    if (mounted) {
+      setState(() => _checkingUpdate = false);
+      await _showUpdateSheet(initialState: state);
+    }
+  }
+
+  Future<void> _showUpdateSheet({required AppUpdateState initialState}) async {
+    var state = initialState;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          Future<void> run(Future<AppUpdateState> Function() action) async {
+            setSheetState(() {
+              state = AppUpdateState(
+                status: AppUpdateStatus.downloading,
+                currentVersion: state.currentVersion,
+                message: '업데이트 작업을 진행하고 있습니다…',
+              );
+            });
+            final next = await action();
+            if (sheetContext.mounted) setSheetState(() => state = next);
+          }
+
+          final available = state.status == AppUpdateStatus.available;
+          final ready = state.status == AppUpdateStatus.readyToInstall;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        available ? Icons.system_update : Icons.info_outline,
+                        size: 32,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          '앱 업데이트',
+                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(sheetContext),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  if (state.currentVersion != null)
+                    Text('현재 버전: ${state.currentVersion}'),
+                  if (state.availableVersionCode != null)
+                    Text('새 버전 코드: ${state.availableVersionCode}'),
+                  const SizedBox(height: 10),
+                  Text(state.message ?? _updateStatusText(state.status)),
+                  if (state.status == AppUpdateStatus.downloading) ...[
+                    const SizedBox(height: 18),
+                    const LinearProgressIndicator(),
+                  ],
+                  const SizedBox(height: 20),
+                  if (available && state.flexibleAllowed)
+                    FilledButton.icon(
+                      onPressed: () => run(_updateService.startFlexible),
+                      icon: const Icon(Icons.download),
+                      label: const Text('백그라운드 업데이트'),
+                    ),
+                  if (available && state.immediateAllowed) ...[
+                    const SizedBox(height: 10),
+                    OutlinedButton.icon(
+                      onPressed: () => run(_updateService.startImmediate),
+                      icon: const Icon(Icons.priority_high),
+                      label: const Text('지금 바로 업데이트'),
+                    ),
+                  ],
+                  if (ready)
+                    FilledButton.icon(
+                      onPressed: () => run(_updateService.completeFlexible),
+                      icon: const Icon(Icons.install_mobile),
+                      label: const Text('다운로드한 업데이트 설치'),
+                    ),
+                  if (!available && !ready)
+                    OutlinedButton(
+                      onPressed: () => Navigator.pop(sheetContext),
+                      child: const Text('확인'),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  String _updateStatusText(AppUpdateStatus status) {
+    return switch (status) {
+      AppUpdateStatus.checking => '업데이트를 확인하고 있습니다.',
+      AppUpdateStatus.unsupported => '이 기기에서는 지원되지 않습니다.',
+      AppUpdateStatus.notPlayInstalled =>
+        'Google Play에서 설치한 앱에서만 인앱 업데이트가 작동합니다.',
+      AppUpdateStatus.upToDate => '현재 최신 버전을 사용하고 있습니다.',
+      AppUpdateStatus.available => '새 업데이트가 있습니다.',
+      AppUpdateStatus.downloading => '업데이트를 처리하고 있습니다.',
+      AppUpdateStatus.readyToInstall => '업데이트 설치 준비가 완료되었습니다.',
+      AppUpdateStatus.completed => '업데이트가 완료되었습니다.',
+      AppUpdateStatus.cancelled => '업데이트가 취소되었습니다.',
+      AppUpdateStatus.failed => '업데이트 처리 중 오류가 발생했습니다.',
+    };
   }
 
   Future<void> _open(File file, String name) async {
@@ -72,6 +204,16 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Mobile PDF Editor'),
         actions: [
+          IconButton(
+            tooltip: '업데이트 확인',
+            onPressed: _checkingUpdate ? null : _checkForUpdate,
+            icon: _checkingUpdate
+                ? const SizedBox.square(
+                    dimension: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.system_update_alt),
+          ),
           IconButton(
             tooltip: '테마 변경',
             onPressed: () {
@@ -162,7 +304,11 @@ class _HomeScreenState extends State<HomeScreen> {
                   (recent) => Card(
                     child: ListTile(
                       leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
-                      title: Text(recent.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                      title: Text(
+                        recent.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       subtitle: const Text('탭하여 계속 편집'),
                       onTap: () => _open(File(recent.path), recent.name),
                       trailing: PopupMenuButton<String>(
