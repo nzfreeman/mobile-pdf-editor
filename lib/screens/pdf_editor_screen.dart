@@ -1,6 +1,8 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
@@ -8,7 +10,6 @@ import 'package:signature/signature.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/editor_item.dart';
-import '../services/drive_service.dart';
 import '../services/pdf_service.dart';
 
 class PdfEditorScreen extends StatefulWidget {
@@ -28,19 +29,30 @@ class PdfEditorScreen extends StatefulWidget {
 class _PdfEditorScreenState extends State<PdfEditorScreen> {
   final _uuid = const Uuid();
   final _pageController = PageController();
+  final _transformController = TransformationController();
   final _picker = ImagePicker();
-  final _drive = DriveService();
   final List<EditorItem> _items = [];
   final List<List<EditorItem>> _undo = [];
   final List<List<EditorItem>> _redo = [];
 
   List<RenderedPdfPage> _pages = [];
+  EditorItem? _clipboard;
   int _pageIndex = 0;
   String? _selectedId;
   bool _loading = true;
   bool _exporting = false;
   bool _drawingMode = false;
+  double _zoomScale = 1;
   List<DrawingPoint> _activeStroke = [];
+
+  EditorItem? get _selectedItem {
+    final id = _selectedId;
+    if (id == null) return null;
+    for (final item in _items) {
+      if (item.id == id) return item;
+    }
+    return null;
+  }
 
   @override
   void initState() {
@@ -51,15 +63,14 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   @override
   void dispose() {
     _pageController.dispose();
+    _transformController.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
     try {
       final pages = await PdfService.renderAllPages(widget.pdfFile);
-      if (mounted) {
-        setState(() => _pages = pages);
-      }
+      if (mounted) setState(() => _pages = pages);
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -67,9 +78,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         );
       }
     } finally {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -77,6 +86,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
 
   void _commit() {
     _undo.add(_snapshot());
+    if (_undo.length > 100) _undo.removeAt(0);
     _redo.clear();
   }
 
@@ -102,16 +112,20 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     });
   }
 
-  Future<void> _addText() async {
-    final controller = TextEditingController();
-    final text = await showDialog<String>(
+  Future<String?> _textDialog({String initialText = '', required String title}) async {
+    final controller = TextEditingController(text: initialText);
+    controller.selection = TextSelection.fromPosition(
+      TextPosition(offset: controller.text.length),
+    );
+    final result = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('텍스트 추가'),
+        title: Text(title),
         content: TextField(
           controller: controller,
           autofocus: true,
-          maxLines: 4,
+          minLines: 3,
+          maxLines: 8,
           decoration: const InputDecoration(border: OutlineInputBorder()),
         ),
         actions: [
@@ -121,13 +135,17 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
-            child: const Text('추가'),
+            child: const Text('확인'),
           ),
         ],
       ),
     );
     controller.dispose();
+    return result;
+  }
 
+  Future<void> _addText() async {
+    final text = await _textDialog(title: '텍스트 추가');
     if (text == null || text.isEmpty) return;
     _commit();
     setState(() {
@@ -135,15 +153,27 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         id: _uuid.v4(),
         type: EditorItemType.text,
         pageIndex: _pageIndex,
-        x: 0.1,
-        y: 0.12,
-        width: 0.5,
+        x: 0.12,
+        y: 0.15,
+        width: 0.46,
         height: 0.1,
         text: text,
       );
       _items.add(item);
       _selectedId = item.id;
+      _drawingMode = false;
     });
+  }
+
+  Future<void> _editText(EditorItem item) async {
+    if (item.type != EditorItemType.text) return;
+    final text = await _textDialog(
+      initialText: item.text ?? '',
+      title: '텍스트 수정',
+    );
+    if (text == null || text == item.text) return;
+    _commit();
+    setState(() => item.text = text);
   }
 
   void _addCheck() {
@@ -153,13 +183,14 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         id: _uuid.v4(),
         type: EditorItemType.check,
         pageIndex: _pageIndex,
-        x: 0.12,
-        y: 0.18,
-        width: 0.1,
-        height: 0.08,
+        x: 0.15,
+        y: 0.2,
+        width: 0.09,
+        height: 0.07,
       );
       _items.add(item);
       _selectedId = item.id;
+      _drawingMode = false;
     });
   }
 
@@ -214,9 +245,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       ),
     );
     controller.dispose();
-
-    if (bytes == null) return;
-    _addImageBytes(bytes, EditorItemType.signature);
+    if (bytes != null) _addImageBytes(bytes, EditorItemType.signature);
   }
 
   Future<void> _pickImage(EditorItemType type) async {
@@ -240,10 +269,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       ),
     );
     if (source == null) return;
-
     final file = await _picker.pickImage(source: source, imageQuality: 92);
-    if (file == null) return;
-    _addImageBytes(await file.readAsBytes(), type);
+    if (file != null) _addImageBytes(await file.readAsBytes(), type);
   }
 
   void _addImageBytes(Uint8List bytes, EditorItemType type) {
@@ -253,14 +280,15 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         id: _uuid.v4(),
         type: type,
         pageIndex: _pageIndex,
-        x: 0.15,
-        y: 0.2,
-        width: 0.35,
+        x: 0.16,
+        y: 0.22,
+        width: 0.34,
         height: 0.18,
         bytes: bytes,
       );
       _items.add(item);
       _selectedId = item.id;
+      _drawingMode = false;
     });
   }
 
@@ -273,12 +301,40 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     });
   }
 
+  void _copySelected() {
+    final item = _selectedItem;
+    if (item == null) return;
+    setState(() => _clipboard = item.copy());
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('개체를 복사했습니다.')),
+    );
+  }
+
+  void _pasteClipboard() {
+    final source = _clipboard;
+    if (source == null) return;
+    _commit();
+    final x = (source.x + 0.035).clamp(0.0, 1.0 - source.width).toDouble();
+    final y = (source.y + 0.035).clamp(0.0, 1.0 - source.height).toDouble();
+    final item = source.copyWith(
+      id: _uuid.v4(),
+      pageIndex: _pageIndex,
+      x: x,
+      y: y,
+    );
+    setState(() {
+      _items.add(item);
+      _selectedId = item.id;
+      _drawingMode = false;
+    });
+  }
+
   void _startStroke(DragStartDetails details, Size size) {
     if (!_drawingMode) return;
     _activeStroke = [
       DrawingPoint(
-        details.localPosition.dx / size.width,
-        details.localPosition.dy / size.height,
+        (details.localPosition.dx / size.width).clamp(0.0, 1.0).toDouble(),
+        (details.localPosition.dy / size.height).clamp(0.0, 1.0).toDouble(),
       ),
     ];
   }
@@ -292,21 +348,47 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
 
   void _endStroke(DragEndDetails details) {
     if (!_drawingMode || _activeStroke.length < 2) return;
+    var minX = 1.0;
+    var minY = 1.0;
+    var maxX = 0.0;
+    var maxY = 0.0;
+    for (final point in _activeStroke) {
+      minX = math.min(minX, point.dx);
+      minY = math.min(minY, point.dy);
+      maxX = math.max(maxX, point.dx);
+      maxY = math.max(maxY, point.dy);
+    }
+    const padding = 0.012;
+    minX = (minX - padding).clamp(0.0, 1.0);
+    minY = (minY - padding).clamp(0.0, 1.0);
+    maxX = (maxX + padding).clamp(0.0, 1.0);
+    maxY = (maxY + padding).clamp(0.0, 1.0);
+    final width = math.max(0.035, maxX - minX);
+    final height = math.max(0.035, maxY - minY);
+    final localPoints = _activeStroke
+        .map(
+          (point) => DrawingPoint(
+            ((point.dx - minX) / width).clamp(0.0, 1.0).toDouble(),
+            ((point.dy - minY) / height).clamp(0.0, 1.0).toDouble(),
+          ),
+        )
+        .toList();
+
     _commit();
+    final item = EditorItem(
+      id: _uuid.v4(),
+      type: EditorItemType.drawing,
+      pageIndex: _pageIndex,
+      x: minX,
+      y: minY,
+      width: width,
+      height: height,
+      points: localPoints,
+      strokeWidth: 3,
+    );
     setState(() {
-      _items.add(
-        EditorItem(
-          id: _uuid.v4(),
-          type: EditorItemType.drawing,
-          pageIndex: _pageIndex,
-          x: 0,
-          y: 0,
-          width: 1,
-          height: 1,
-          points: List.of(_activeStroke),
-          strokeWidth: 3,
-        ),
-      );
+      _items.add(item);
+      _selectedId = item.id;
       _activeStroke = [];
     });
   }
@@ -325,6 +407,36 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     }
   }
 
+  String get _outputName {
+    final base = widget.fileName.replaceAll(RegExp(r'\.[Pp][Dd][Ff]$'), '');
+    return '${base}_edited.pdf';
+  }
+
+  Future<void> _savePdf() async {
+    try {
+      final file = await _exportFile();
+      if (file == null) return;
+      final savedPath = await FilePicker.platform.saveFile(
+        dialogTitle: '편집한 PDF 저장',
+        fileName: _outputName,
+        type: FileType.custom,
+        allowedExtensions: const ['pdf'],
+        bytes: await file.readAsBytes(),
+      );
+      if (savedPath != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PDF를 저장했습니다.')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDF 저장 실패: $error')),
+        );
+      }
+    }
+  }
+
   Future<void> _share() async {
     final file = await _exportFile();
     if (file == null) return;
@@ -336,27 +448,22 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     );
   }
 
-  Future<void> _saveDrive() async {
-    try {
-      final file = await _exportFile();
-      if (file == null) return;
-      await _drive.upload(file);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Google Drive에 저장했습니다.')),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Drive 저장 실패: $error')),
-        );
-      }
-    }
+  void _resetView() {
+    _transformController.value = Matrix4.identity();
+    if (_zoomScale != 1) setState(() => _zoomScale = 1);
+  }
+
+  void _goToPage(int index) {
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final selected = _selectedItem;
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -365,35 +472,72 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: '화면 맞춤',
+            onPressed: _resetView,
+            icon: const Icon(Icons.fit_screen),
+          ),
+          IconButton(
+            tooltip: '실행 취소',
             onPressed: _undo.isEmpty ? null : _undoAction,
             icon: const Icon(Icons.undo),
           ),
           IconButton(
+            tooltip: '다시 실행',
             onPressed: _redo.isEmpty ? null : _redoAction,
             icon: const Icon(Icons.redo),
           ),
           IconButton(
-            onPressed: _selectedId == null ? null : _deleteSelected,
-            icon: const Icon(Icons.delete_outline),
+            tooltip: '저장',
+            onPressed: _exporting ? null : _savePdf,
+            icon: const Icon(Icons.save_outlined),
           ),
           PopupMenuButton<String>(
             onSelected: (value) {
+              if (value == 'edit' && selected != null) _editText(selected);
+              if (value == 'copy') _copySelected();
+              if (value == 'paste') _pasteClipboard();
+              if (value == 'delete') _deleteSelected();
               if (value == 'share') _share();
-              if (value == 'drive') _saveDrive();
             },
-            itemBuilder: (_) => const [
+            itemBuilder: (_) => [
+              if (selected?.type == EditorItemType.text)
+                const PopupMenuItem(
+                  value: 'edit',
+                  child: ListTile(
+                    leading: Icon(Icons.edit),
+                    title: Text('텍스트 수정'),
+                  ),
+                ),
               PopupMenuItem(
+                value: 'copy',
+                enabled: selected != null,
+                child: const ListTile(
+                  leading: Icon(Icons.copy),
+                  title: Text('복사'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'paste',
+                enabled: _clipboard != null,
+                child: const ListTile(
+                  leading: Icon(Icons.paste),
+                  title: Text('붙여넣기'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'delete',
+                enabled: selected != null,
+                child: const ListTile(
+                  leading: Icon(Icons.delete_outline),
+                  title: Text('삭제'),
+                ),
+              ),
+              const PopupMenuDivider(),
+              const PopupMenuItem(
                 value: 'share',
                 child: ListTile(
                   leading: Icon(Icons.share),
                   title: Text('저장 및 공유'),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'drive',
-                child: ListTile(
-                  leading: Icon(Icons.cloud_upload),
-                  title: Text('Google Drive 저장'),
                 ),
               ),
             ],
@@ -406,45 +550,127 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
               ? const Center(child: Text('표시할 페이지가 없습니다.'))
               : PageView.builder(
                   controller: _pageController,
+                  physics: _drawingMode || _selectedId != null || _zoomScale > 1.01
+                      ? const NeverScrollableScrollPhysics()
+                      : const PageScrollPhysics(),
                   itemCount: _pages.length,
-                  onPageChanged: (index) => setState(() {
-                    _pageIndex = index;
-                    _selectedId = null;
-                    _activeStroke = [];
-                  }),
+                  onPageChanged: (index) {
+                    setState(() {
+                      _pageIndex = index;
+                      _selectedId = null;
+                      _activeStroke = [];
+                    });
+                    _resetView();
+                  },
                   itemBuilder: (_, index) => _buildPage(index),
                 ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _drawingMode ? 2 : 0,
-        onDestinationSelected: (index) {
-          if (index == 0) _addText();
-          if (index == 1) _addCheck();
-          if (index == 2) setState(() => _drawingMode = !_drawingMode);
-          if (index == 3) _addSignature();
-          if (index == 4) _showMore();
-        },
-        destinations: [
-          const NavigationDestination(
-            icon: Icon(Icons.text_fields),
-            label: '텍스트',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.check_box_outlined),
-            label: '체크',
-          ),
-          NavigationDestination(
-            icon: Icon(_drawingMode ? Icons.edit_off : Icons.draw),
-            label: _drawingMode ? '필기 종료' : '자유 필기',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.gesture),
-            label: '서명',
-          ),
-          const NavigationDestination(
-            icon: Icon(Icons.add_circle_outline),
-            label: '더보기',
-          ),
-        ],
+      bottomNavigationBar: _pages.isEmpty
+          ? null
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildThumbnails(),
+                NavigationBar(
+                  selectedIndex: _drawingMode ? 2 : 4,
+                  onDestinationSelected: (index) {
+                    if (index == 0) _addText();
+                    if (index == 1) _addCheck();
+                    if (index == 2) {
+                      setState(() {
+                        _drawingMode = !_drawingMode;
+                        _selectedId = null;
+                        _activeStroke = [];
+                      });
+                      _resetView();
+                    }
+                    if (index == 3) _addSignature();
+                    if (index == 4) _showMore();
+                  },
+                  destinations: [
+                    const NavigationDestination(
+                      icon: Icon(Icons.text_fields),
+                      label: '텍스트',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.check_box_outlined),
+                      label: '체크',
+                    ),
+                    NavigationDestination(
+                      icon: Icon(_drawingMode ? Icons.edit_off : Icons.draw),
+                      label: _drawingMode ? '필기 종료' : '자유 필기',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.gesture),
+                      label: '서명',
+                    ),
+                    const NavigationDestination(
+                      icon: Icon(Icons.add_circle_outline),
+                      label: '더보기',
+                    ),
+                  ],
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildThumbnails() {
+    return Material(
+      elevation: 2,
+      child: SizedBox(
+        height: 92,
+        child: ListView.separated(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          scrollDirection: Axis.horizontal,
+          itemCount: _pages.length,
+          separatorBuilder: (_, __) => const SizedBox(width: 8),
+          itemBuilder: (_, index) {
+            final selected = index == _pageIndex;
+            return InkWell(
+              onTap: () => _goToPage(index),
+              borderRadius: BorderRadius.circular(6),
+              child: Container(
+                width: 58,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: selected
+                        ? Theme.of(context).colorScheme.primary
+                        : Colors.black26,
+                    width: selected ? 3 : 1,
+                  ),
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(3),
+                      child: Image.memory(_pages[index].bytes, fit: BoxFit.contain),
+                    ),
+                    Positioned(
+                      right: 2,
+                      bottom: 2,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.7),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          child: Text(
+                            '${index + 1}',
+                            style: const TextStyle(color: Colors.white, fontSize: 10),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -471,6 +697,28 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 _pickImage(EditorItemType.stamp);
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.copy),
+              title: const Text('선택 개체 복사'),
+              enabled: _selectedItem != null,
+              onTap: _selectedItem == null
+                  ? null
+                  : () {
+                      Navigator.pop(sheetContext);
+                      _copySelected();
+                    },
+            ),
+            ListTile(
+              leading: const Icon(Icons.paste),
+              title: const Text('붙여넣기'),
+              enabled: _clipboard != null,
+              onTap: _clipboard == null
+                  ? null
+                  : () {
+                      Navigator.pop(sheetContext);
+                      _pasteClipboard();
+                    },
+            ),
           ],
         ),
       ),
@@ -479,28 +727,69 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
 
   Widget _buildPage(int index) {
     final page = _pages[index];
-    return Center(
-      child: AspectRatio(
-        aspectRatio: page.aspectRatio,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final size = Size(constraints.maxWidth, constraints.maxHeight);
-            final pageItems = _items.where((item) => item.pageIndex == index).toList();
-            return GestureDetector(
-              onTap: () => setState(() => _selectedId = null),
-              onPanStart: (details) => _startStroke(details, size),
-              onPanUpdate: (details) => _updateStroke(details, size),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = math.max(1.0, constraints.maxWidth - 24);
+        final availableHeight = math.max(1.0, constraints.maxHeight - 24);
+        var pageWidth = availableWidth;
+        var pageHeight = pageWidth / page.aspectRatio;
+        if (pageHeight > availableHeight) {
+          pageHeight = availableHeight;
+          pageWidth = pageHeight * page.aspectRatio;
+        }
+        final pageSize = Size(pageWidth, pageHeight);
+        final pageItems = _items.where((item) => item.pageIndex == index).toList();
+
+        return InteractiveViewer(
+          transformationController: _transformController,
+          constrained: false,
+          alignment: Alignment.center,
+          boundaryMargin: const EdgeInsets.all(240),
+          minScale: 1,
+          maxScale: 5,
+          panEnabled: !_drawingMode && _selectedId == null,
+          scaleEnabled: !_drawingMode,
+          onInteractionUpdate: (_) {
+            final scale = _transformController.value.getMaxScaleOnAxis();
+            if ((scale - _zoomScale).abs() > 0.02) {
+              setState(() => _zoomScale = scale);
+            }
+          },
+          child: SizedBox(
+            width: pageWidth,
+            height: pageHeight,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () {
+                if (!_drawingMode) setState(() => _selectedId = null);
+              },
+              onPanStart: (details) => _startStroke(details, pageSize),
+              onPanUpdate: (details) => _updateStroke(details, pageSize),
               onPanEnd: _endStroke,
               child: Stack(
+                clipBehavior: Clip.none,
                 children: [
                   Positioned.fill(
-                    child: Image.memory(page.bytes, fit: BoxFit.fill),
+                    child: DecoratedBox(
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        boxShadow: [
+                          BoxShadow(
+                            blurRadius: 8,
+                            color: Color(0x33000000),
+                          ),
+                        ],
+                      ),
+                      child: Image.memory(page.bytes, fit: BoxFit.fill),
+                    ),
                   ),
-                  ...pageItems.map((item) => _itemWidget(item, size)),
+                  ...pageItems.map((item) => _itemWidget(item, pageSize)),
                   if (_activeStroke.isNotEmpty)
                     Positioned.fill(
-                      child: CustomPaint(
-                        painter: _StrokePainter(_activeStroke, Colors.black, 3),
+                      child: IgnorePointer(
+                        child: CustomPaint(
+                          painter: _StrokePainter(_activeStroke, Colors.black, 3),
+                        ),
                       ),
                     ),
                   if (_drawingMode)
@@ -518,78 +807,186 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                     ),
                 ],
               ),
-            );
-          },
-        ),
-      ),
+            ),
+          ),
+        );
+      },
     );
   }
 
-  Widget _itemWidget(EditorItem item, Size size) {
-    if (item.type == EditorItemType.drawing) {
-      return Positioned.fill(
-        child: CustomPaint(
-          painter: _StrokePainter(
-            item.points,
-            Color(item.colorValue),
-            item.strokeWidth,
+  Widget _itemWidget(EditorItem item, Size pageSize) {
+    final selected = _selectedId == item.id;
+    final itemWidth = item.width * pageSize.width;
+    final itemHeight = item.height * pageSize.height;
+
+    final Widget content;
+    if (item.type == EditorItemType.text) {
+      content = Align(
+        alignment: Alignment.topLeft,
+        child: Text(
+          item.text ?? '',
+          style: TextStyle(
+            fontSize: item.fontSize,
+            color: Color(item.colorValue),
           ),
         ),
       );
-    }
-
-    final selected = _selectedId == item.id;
-    final Widget child;
-    if (item.type == EditorItemType.text) {
-      child = Text(
-        item.text ?? '',
-        style: TextStyle(
-          fontSize: item.fontSize,
-          color: Color(item.colorValue),
+    } else if (item.type == EditorItemType.check) {
+      content = const FittedBox(child: Text('✓'));
+    } else if (item.type == EditorItemType.drawing) {
+      content = CustomPaint(
+        painter: _StrokePainter(
+          item.points,
+          Color(item.colorValue),
+          item.strokeWidth,
         ),
       );
-    } else if (item.type == EditorItemType.check) {
-      child = const FittedBox(child: Text('✓'));
     } else {
-      child = item.bytes == null
+      content = item.bytes == null
           ? const SizedBox()
           : Image.memory(item.bytes!, fit: BoxFit.contain);
     }
 
     return Positioned(
-      left: item.x * size.width,
-      top: item.y * size.height,
-      width: item.width * size.width,
-      height: item.height * size.height,
-      child: GestureDetector(
-        onTap: () {
-          if (!_drawingMode) setState(() => _selectedId = item.id);
-        },
-        onPanStart: (_) {
-          if (!_drawingMode) _commit();
-        },
-        onPanUpdate: (details) {
-          if (_drawingMode) return;
-          setState(() {
-            item.x = (item.x + details.delta.dx / size.width)
-                .clamp(0.0, 1.0 - item.width)
-                .toDouble();
-            item.y = (item.y + details.delta.dy / size.height)
-                .clamp(0.0, 1.0 - item.height)
-                .toDouble();
-          });
-        },
-        child: Container(
-          decoration: BoxDecoration(
-            border: selected
-                ? Border.all(
-                    color: Theme.of(context).colorScheme.primary,
-                    width: 2,
-                  )
-                : null,
-          ),
-          child: child,
+      left: item.x * pageSize.width,
+      top: item.y * pageSize.height,
+      width: itemWidth,
+      height: itemHeight,
+      child: Transform.rotate(
+        angle: item.rotation,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  if (!_drawingMode) setState(() => _selectedId = item.id);
+                },
+                onDoubleTap: item.type == EditorItemType.text
+                    ? () => _editText(item)
+                    : null,
+                onPanStart: (_) {
+                  if (_drawingMode) return;
+                  _commit();
+                  setState(() => _selectedId = item.id);
+                },
+                onPanUpdate: (details) {
+                  if (_drawingMode) return;
+                  setState(() {
+                    item.x = (item.x + details.delta.dx / pageSize.width)
+                        .clamp(0.0, 1.0 - item.width)
+                        .toDouble();
+                    item.y = (item.y + details.delta.dy / pageSize.height)
+                        .clamp(0.0, 1.0 - item.height)
+                        .toDouble();
+                  });
+                },
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: selected
+                        ? Border.all(
+                            color: Theme.of(context).colorScheme.primary,
+                            width: 2,
+                          )
+                        : null,
+                  ),
+                  child: Padding(
+                    padding: selected ? const EdgeInsets.all(2) : EdgeInsets.zero,
+                    child: content,
+                  ),
+                ),
+              ),
+            ),
+            if (selected) ...[
+              Positioned(
+                top: -34,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: GestureDetector(
+                    onPanStart: (_) => _commit(),
+                    onPanUpdate: (details) {
+                      setState(() {
+                        item.rotation += details.delta.dx * 0.018;
+                      });
+                    },
+                    child: _handle(
+                      icon: Icons.rotate_right,
+                      tooltip: '좌우로 드래그하여 회전',
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: -14,
+                bottom: -14,
+                child: GestureDetector(
+                  onPanStart: (_) => _commit(),
+                  onPanUpdate: (details) {
+                    setState(() {
+                      final oldWidth = item.width;
+                      final nextWidth = (item.width + details.delta.dx / pageSize.width)
+                          .clamp(0.045, 1.0 - item.x)
+                          .toDouble();
+                      final nextHeight = (item.height + details.delta.dy / pageSize.height)
+                          .clamp(0.035, 1.0 - item.y)
+                          .toDouble();
+                      item.width = nextWidth;
+                      item.height = nextHeight;
+                      if (item.type == EditorItemType.text && oldWidth > 0) {
+                        item.fontSize = (item.fontSize * nextWidth / oldWidth)
+                            .clamp(8.0, 96.0)
+                            .toDouble();
+                      }
+                    });
+                  },
+                  child: _handle(
+                    icon: Icons.open_in_full,
+                    tooltip: '드래그하여 크기 조절',
+                  ),
+                ),
+              ),
+              Positioned(
+                left: -14,
+                top: -14,
+                child: GestureDetector(
+                  onTap: _deleteSelected,
+                  child: _handle(
+                    icon: Icons.close,
+                    tooltip: '삭제',
+                    danger: true,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _handle({
+    required IconData icon,
+    required String tooltip,
+    bool danger = false,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: danger
+              ? Theme.of(context).colorScheme.error
+              : Theme.of(context).colorScheme.primary,
+          shape: BoxShape.circle,
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: const [
+            BoxShadow(blurRadius: 3, color: Color(0x55000000)),
+          ],
+        ),
+        child: Icon(icon, color: Colors.white, size: 16),
       ),
     );
   }
@@ -609,7 +1006,8 @@ class _StrokePainter extends CustomPainter {
       ..color = color
       ..strokeWidth = width
       ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
     final path = Path();
     final first = points.first.toOffset(size);
     path.moveTo(first.dx, first.dy);
