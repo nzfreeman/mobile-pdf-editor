@@ -15,6 +15,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
       - name: Update deprecated Flutter APIs
         run: |
           python3 - <<'PY'
