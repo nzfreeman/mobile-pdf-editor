@@ -105,9 +105,8 @@ class _OrganizePdfScreenState extends State<OrganizePdfScreen> {
           : ReorderableListView.builder(
               padding: const EdgeInsets.all(12),
               itemCount: _pages.length,
-              onReorder: (oldIndex, newIndex) {
+              onReorderItem: (oldIndex, newIndex) {
                 setState(() {
-                  if (newIndex > oldIndex) newIndex -= 1;
                   final page = _pages.removeAt(oldIndex);
                   _pages.insert(newIndex, page);
                 });
