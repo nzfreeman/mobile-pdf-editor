@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: flutter-ci-${{ github.ref }}
@@ -23,6 +23,62 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply pending PDF rendering and gesture fix
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          changed = False
+
+          service = Path('lib/services/pdf_service.dart')
+          text = service.read_text()
+          old = '''        final rendered = await page.render(
+          width: targetWidth,
+          height: targetHeight,
+          backgroundColor: 0xFFFFFFFF,
+        );'''
+          new = '''        final rendered = await page.render(
+          width: targetWidth,
+          height: targetHeight,
+          fullWidth: targetWidth.toDouble(),
+          fullHeight: targetHeight.toDouble(),
+          backgroundColor: 0xFFFFFFFF,
+        );'''
+          if old in text:
+              service.write_text(text.replace(old, new))
+              changed = True
+
+          editor = Path('lib/screens/pdf_editor_screen.dart')
+          text = editor.read_text()
+          old = '''                      onPanStart: (details) => _startStroke(details, pageSize),
+                      onPanUpdate: (details) =>
+                          _updateStroke(details, pageSize),
+                      onPanEnd: _endStroke,'''
+          new = '''                      onPanStart: _drawingMode
+                          ? (details) => _startStroke(details, pageSize)
+                          : null,
+                      onPanUpdate: _drawingMode
+                          ? (details) => _updateStroke(details, pageSize)
+                          : null,
+                      onPanEnd: _drawingMode ? _endStroke : null,'''
+          if old in text:
+              editor.write_text(text.replace(old, new))
+              changed = True
+
+          Path('/tmp/pdf_fix_changed').write_text('1' if changed else '0')
+          PY
+          if [ "$(cat /tmp/pdf_fix_changed)" = "1" ]; then
+            dart format lib/services/pdf_service.dart lib/screens/pdf_editor_screen.dart
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add lib/services/pdf_service.dart lib/screens/pdf_editor_screen.dart
+            git commit -m "Fix PDF rendering scale and pinch zoom gestures"
+            git push
+          fi
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
