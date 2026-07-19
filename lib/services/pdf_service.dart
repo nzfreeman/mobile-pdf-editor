@@ -136,17 +136,20 @@ class PdfService {
             color: pdf_core.PdfColor.fromInt(item.colorValue),
           ),
         );
+        break;
       case EditorItemType.check:
         child = pw.Text(
           '✓',
           style: pw.TextStyle(fontSize: itemHeight * 0.8),
         );
+        break;
       case EditorItemType.signature:
       case EditorItemType.image:
       case EditorItemType.stamp:
         child = item.bytes == null
             ? pw.SizedBox()
             : pw.Image(pw.MemoryImage(item.bytes!), fit: pw.BoxFit.contain);
+        break;
       case EditorItemType.drawing:
         child = pw.CustomPaint(
           size: pdf_core.PdfPoint(width, height),
