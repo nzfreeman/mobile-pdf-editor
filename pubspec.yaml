@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  file_picker: ^10.1.9
+  file_picker: ^11.0.2
   image_picker: ^1.1.2
   pdfx: ^2.9.2
   pdf: ^3.11.3
