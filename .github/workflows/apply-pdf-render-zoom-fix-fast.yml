@@ -1,15 +1,16 @@
 name: Apply PDF render and zoom fix fast
 
 on:
-  push:
-    paths:
-      - '.github/workflows/apply-pdf-render-zoom-fix-fast.yml'
+  issues:
+    types: [opened]
 
 permissions:
   contents: write
+  issues: read
 
 jobs:
   patch:
+    if: github.event.issue.title == 'RUN PDF RENDER ZOOM FIX'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
