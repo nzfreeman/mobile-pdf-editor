@@ -1,0 +1,26 @@
+name: mobile_pdf_editor
+description: Multi-page Flutter PDF editor with drawing, images, stamps, undo/redo and Google Drive.
+publish_to: 'none'
+version: 0.2.0+2
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  file_picker: ^10.1.9
+  image_picker: ^1.1.2
+  pdfx: ^2.9.2
+  pdf: ^3.11.3
+  path_provider: ^2.1.5
+  share_plus: ^11.0.0
+  signature: ^6.0.0
+  uuid: ^4.5.1
+  google_sign_in: ^6.2.2
+  googleapis: ^13.2.0
+  extension_google_sign_in_as_googleapis_auth: ^2.0.13
+
+flutter:
+  uses-material-design: true
