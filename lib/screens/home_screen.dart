@@ -74,10 +74,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 label: const Text('기기에서 PDF 열기'),
               ),
               const SizedBox(height: 12),
-              const OutlinedButton.icon(
+              OutlinedButton.icon(
                 onPressed: null,
-                icon: Icon(Icons.cloud),
-                label: Text('Google Drive 연결 준비 중'),
+                icon: const Icon(Icons.cloud),
+                label: const Text('Google Drive 연결 준비 중'),
               ),
               if (_busy) ...[
                 const SizedBox(height: 20),
