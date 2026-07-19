@@ -62,7 +62,9 @@ class _HomeScreenState extends State<HomeScreen> {
             setSheetState(() {
               state = AppUpdateState(
                 status: AppUpdateStatus.downloading,
+                source: state.source,
                 currentVersion: state.currentVersion,
+                latestVersion: state.latestVersion,
                 message: '업데이트 작업을 진행하고 있습니다…',
               );
             });
@@ -70,8 +72,25 @@ class _HomeScreenState extends State<HomeScreen> {
             if (sheetContext.mounted) setSheetState(() => state = next);
           }
 
+          Future<void> openGitHubDownload() async {
+            final opened = await _updateService.openGitHubDownload(state);
+            if (!opened && sheetContext.mounted) {
+              setSheetState(() {
+                state = AppUpdateState(
+                  status: AppUpdateStatus.failed,
+                  source: AppUpdateSource.github,
+                  currentVersion: state.currentVersion,
+                  latestVersion: state.latestVersion,
+                  message: 'APK 다운로드 페이지를 열지 못했습니다.',
+                );
+              });
+            }
+          }
+
           final available = state.status == AppUpdateStatus.available;
           final ready = state.status == AppUpdateStatus.readyToInstall;
+          final github = state.source == AppUpdateSource.github;
+          final play = state.source == AppUpdateSource.googlePlay;
           return SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
@@ -104,22 +123,51 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 12),
                   if (state.currentVersion != null)
                     Text('현재 버전: ${state.currentVersion}'),
+                  if (state.latestVersion != null)
+                    Text('최신 버전: ${state.latestVersion}'),
                   if (state.availableVersionCode != null)
                     Text('새 버전 코드: ${state.availableVersionCode}'),
+                  if (state.source != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      state.source == AppUpdateSource.googlePlay
+                          ? '업데이트 경로: Google Play'
+                          : '업데이트 경로: GitHub Releases',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   Text(state.message ?? _updateStatusText(state.status)),
+                  if (github && state.releaseNotes != null) ...[
+                    const SizedBox(height: 12),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 140),
+                      child: SingleChildScrollView(
+                        child: Text(
+                          state.releaseNotes!,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ),
+                    ),
+                  ],
                   if (state.status == AppUpdateStatus.downloading) ...[
                     const SizedBox(height: 18),
                     const LinearProgressIndicator(),
                   ],
                   const SizedBox(height: 20),
-                  if (available && state.flexibleAllowed)
+                  if (available && github)
+                    FilledButton.icon(
+                      onPressed: openGitHubDownload,
+                      icon: const Icon(Icons.download),
+                      label: const Text('새 APK 다운로드'),
+                    ),
+                  if (available && play && state.flexibleAllowed)
                     FilledButton.icon(
                       onPressed: () => run(_updateService.startFlexible),
                       icon: const Icon(Icons.download),
                       label: const Text('백그라운드 업데이트'),
                     ),
-                  if (available && state.immediateAllowed) ...[
+                  if (available && play && state.immediateAllowed) ...[
                     const SizedBox(height: 10),
                     OutlinedButton.icon(
                       onPressed: () => run(_updateService.startImmediate),
@@ -138,6 +186,13 @@ class _HomeScreenState extends State<HomeScreen> {
                       onPressed: () => Navigator.pop(sheetContext),
                       child: const Text('확인'),
                     ),
+                  if (available) ...[
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: () => Navigator.pop(sheetContext),
+                      child: const Text('나중에'),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -151,8 +206,6 @@ class _HomeScreenState extends State<HomeScreen> {
     return switch (status) {
       AppUpdateStatus.checking => '업데이트를 확인하고 있습니다.',
       AppUpdateStatus.unsupported => '이 기기에서는 지원되지 않습니다.',
-      AppUpdateStatus.notPlayInstalled =>
-        'Google Play에서 설치한 앱에서만 인앱 업데이트가 작동합니다.',
       AppUpdateStatus.upToDate => '현재 최신 버전을 사용하고 있습니다.',
       AppUpdateStatus.available => '새 업데이트가 있습니다.',
       AppUpdateStatus.downloading => '업데이트를 처리하고 있습니다.',
