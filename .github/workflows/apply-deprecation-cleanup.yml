@@ -1,0 +1,62 @@
+name: Apply deprecation cleanup
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-deprecation-cleanup.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update deprecated Flutter APIs
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          organize = Path('lib/screens/organize_pdf_screen.dart')
+          text = organize.read_text()
+          old = """              onReorder: (oldIndex, newIndex) {
+                setState(() {
+                  if (newIndex > oldIndex) newIndex -= 1;
+                  final page = _pages.removeAt(oldIndex);
+                  _pages.insert(newIndex, page);
+                });
+              },"""
+          new = """              onReorderItem: (oldIndex, newIndex) {
+                setState(() {
+                  final page = _pages.removeAt(oldIndex);
+                  _pages.insert(newIndex, page);
+                });
+              },"""
+          if old not in text:
+              raise SystemExit('Expected onReorder block was not found')
+          organize.write_text(text.replace(old, new))
+
+          editor = Path('lib/screens/pdf_editor_screen.dart')
+          text = editor.read_text()
+          old = "Matrix4.identity()..scale(2.0)"
+          new = "Matrix4.diagonal3Values(2.0, 2.0, 1.0)"
+          if old not in text:
+              raise SystemExit('Expected deprecated Matrix4.scale call was not found')
+          editor.write_text(text.replace(old, new))
+
+          home = Path('lib/screens/home_screen.dart').read_text()
+          if 'AppUpdateStatus.notPlayInstalled' in home:
+              raise SystemExit('Stale notPlayInstalled enum reference still exists')
+          PY
+      - name: Format changed files
+        run: dart format lib/screens/organize_pdf_screen.dart lib/screens/pdf_editor_screen.dart
+      - name: Commit cleanup
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add lib/screens/organize_pdf_screen.dart lib/screens/pdf_editor_screen.dart
+          git commit -m "Replace deprecated Flutter APIs"
+          git push
