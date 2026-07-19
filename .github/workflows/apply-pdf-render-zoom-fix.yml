@@ -1,0 +1,77 @@
+name: Apply PDF render and zoom fix
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-pdf-render-zoom-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Fix PDF render scale and gesture routing
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          service = Path('lib/services/pdf_service.dart')
+          text = service.read_text()
+          old = '''        final rendered = await page.render(
+          width: targetWidth,
+          height: targetHeight,
+          backgroundColor: 0xFFFFFFFF,
+        );'''
+          new = '''        final rendered = await page.render(
+          width: targetWidth,
+          height: targetHeight,
+          fullWidth: targetWidth.toDouble(),
+          fullHeight: targetHeight.toDouble(),
+          backgroundColor: 0xFFFFFFFF,
+        );'''
+          if old not in text:
+              raise SystemExit('Expected PdfPage.render block not found')
+          service.write_text(text.replace(old, new))
+
+          editor = Path('lib/screens/pdf_editor_screen.dart')
+          text = editor.read_text()
+          old = '''                      onPanStart: (details) => _startStroke(details, pageSize),
+                      onPanUpdate: (details) =>
+                          _updateStroke(details, pageSize),
+                      onPanEnd: _endStroke,'''
+          new = '''                      onPanStart: _drawingMode
+                          ? (details) => _startStroke(details, pageSize)
+                          : null,
+                      onPanUpdate: _drawingMode
+                          ? (details) => _updateStroke(details, pageSize)
+                          : null,
+                      onPanEnd: _drawingMode ? _endStroke : null,'''
+          if old not in text:
+              raise SystemExit('Expected drawing gesture block not found')
+          editor.write_text(text.replace(old, new))
+          PY
+      - name: Format source
+        run: dart format lib/services/pdf_service.dart lib/screens/pdf_editor_screen.dart
+      - name: Resolve dependencies
+        run: flutter pub get
+      - name: Analyze source
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+      - name: Build release APK
+        run: |
+          flutter create --platforms=android .
+          flutter build apk --release
+      - name: Commit fixes
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add lib/services/pdf_service.dart lib/screens/pdf_editor_screen.dart pubspec.lock
+          git commit -m "Fix PDF rendering scale and pinch zoom gestures"
+          git push
