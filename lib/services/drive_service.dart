@@ -6,23 +6,34 @@ import 'package:googleapis/drive/v3.dart' as drive;
 import 'package:path_provider/path_provider.dart';
 
 class DrivePdfFile {
-  const DrivePdfFile({required this.id, required this.name, this.modifiedTime});
+  const DrivePdfFile({
+    required this.id,
+    required this.name,
+    this.modifiedTime,
+  });
+
   final String id;
   final String name;
   final DateTime? modifiedTime;
 }
 
 class DriveService {
-  DriveService()
-      : _signIn = GoogleSignIn(scopes: const [drive.DriveApi.driveFileScope]);
+  static const _scopes = <String>[drive.DriveApi.driveFileScope];
 
-  final GoogleSignIn _signIn;
+  final GoogleSignIn _signIn = GoogleSignIn.instance;
+  Future<void>? _initialization;
+
+  Future<void> _ensureInitialized() {
+    return _initialization ??= _signIn.initialize();
+  }
 
   Future<drive.DriveApi> _api() async {
-    await _signIn.signInSilently();
-    if (_signIn.currentUser == null) await _signIn.signIn();
-    final client = await _signIn.authenticatedClient();
-    if (client == null) throw StateError('Google 계정 인증에 실패했습니다.');
+    await _ensureInitialized();
+    final account = await _signIn.authenticate();
+    final authorization = await account.authorizationClient.authorizeScopes(
+      _scopes,
+    );
+    final client = authorization.authClient(scopes: _scopes);
     return drive.DriveApi(client);
   }
 
@@ -36,8 +47,14 @@ class DriveService {
       $fields: 'files(id,name,modifiedTime)',
     );
     return (response.files ?? [])
-        .where((f) => f.id != null && f.name != null)
-        .map((f) => DrivePdfFile(id: f.id!, name: f.name!, modifiedTime: f.modifiedTime))
+        .where((file) => file.id != null && file.name != null)
+        .map(
+          (file) => DrivePdfFile(
+            id: file.id!,
+            name: file.name!,
+            modifiedTime: file.modifiedTime,
+          ),
+        )
         .toList();
   }
 
@@ -52,7 +69,10 @@ class DriveService {
       bytes.addAll(chunk);
     }
     final directory = await getTemporaryDirectory();
-    final safeName = file.name.replaceAll(RegExp(r'[^a-zA-Z0-9가-힣_.-]'), '_');
+    final safeName = file.name.replaceAll(
+      RegExp(r'[^a-zA-Z0-9가-힣_.-]'),
+      '_',
+    );
     final output = File('${directory.path}/$safeName');
     return output.writeAsBytes(bytes, flush: true);
   }
@@ -67,9 +87,14 @@ class DriveService {
       uploadMedia: drive.Media(file.openRead(), await file.length()),
       $fields: 'id',
     );
-    if (created.id == null) throw StateError('Google Drive 업로드 결과를 확인할 수 없습니다.');
+    if (created.id == null) {
+      throw StateError('Google Drive 업로드 결과를 확인할 수 없습니다.');
+    }
     return created.id!;
   }
 
-  Future<void> signOut() => _signIn.signOut();
+  Future<void> signOut() async {
+    await _ensureInitialized();
+    await _signIn.signOut();
+  }
 }
