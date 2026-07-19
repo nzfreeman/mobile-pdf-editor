@@ -118,13 +118,13 @@ class PdfService {
 
   static pw.Widget _buildPdfItem(
     EditorItem item,
-    double width,
-    double height,
+    double pageWidth,
+    double pageHeight,
   ) {
-    final left = item.x * width;
-    final top = item.y * height;
-    final itemWidth = item.width * width;
-    final itemHeight = item.height * height;
+    final left = item.x * pageWidth;
+    final top = item.y * pageHeight;
+    final itemWidth = item.width * pageWidth;
+    final itemHeight = item.height * pageHeight;
 
     late pw.Widget child;
     switch (item.type) {
@@ -152,21 +152,27 @@ class PdfService {
         break;
       case EditorItemType.drawing:
         child = pw.CustomPaint(
-          size: pdf_core.PdfPoint(width, height),
+          size: pdf_core.PdfPoint(itemWidth, itemHeight),
           painter: (canvas, size) {
             if (item.points.length < 2) return;
             canvas
               ..setStrokeColor(pdf_core.PdfColor.fromInt(item.colorValue))
               ..setLineWidth(item.strokeWidth);
             final first = item.points.first;
-            canvas.moveTo(first.dx * width, height - first.dy * height);
+            canvas.moveTo(
+              first.dx * itemWidth,
+              itemHeight - first.dy * itemHeight,
+            );
             for (final point in item.points.skip(1)) {
-              canvas.lineTo(point.dx * width, height - point.dy * height);
+              canvas.lineTo(
+                point.dx * itemWidth,
+                itemHeight - point.dy * itemHeight,
+              );
             }
             canvas.strokePath();
           },
         );
-        return pw.Positioned.fill(child: child);
+        break;
     }
 
     return pw.Positioned(
