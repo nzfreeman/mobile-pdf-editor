@@ -31,7 +31,7 @@ jobs:
       - name: Generate Android project files
         run: flutter create . --platforms=android --org com.nzqueenbee --project-name mobile_pdf_editor
 
-      - name: Add Android permissions
+      - name: Configure Android project
         shell: bash
         run: |
           python3 - <<'PY'
@@ -47,6 +47,14 @@ jobs:
           if 'android.permission.INTERNET' not in text:
               text = text.replace(marker, marker + '\n' + permissions, 1)
           manifest.write_text(text, encoding='utf-8')
+
+          gradle = Path('android/app/build.gradle.kts')
+          gradle_text = gradle.read_text(encoding='utf-8')
+          gradle_text = gradle_text.replace(
+              'minSdk = flutter.minSdkVersion',
+              'minSdk = 24',
+          )
+          gradle.write_text(gradle_text, encoding='utf-8')
           PY
 
       - name: Install dependencies
