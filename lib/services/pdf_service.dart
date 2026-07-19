@@ -1,11 +1,12 @@
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:path_provider/path_provider.dart';
-import 'package:pdf/pdf.dart';
+import 'package:pdf/pdf.dart' as pdf_core;
 import 'package:pdf/widgets.dart' as pw;
-import 'package:pdfx/pdfx.dart';
+import 'package:pdfrx/pdfrx.dart' as pdfrx;
 
 import '../models/editor_item.dart';
 
@@ -19,37 +20,57 @@ class RenderedPdfPage {
   final Uint8List bytes;
   final double width;
   final double height;
+
   double get aspectRatio => width / height;
 }
 
 class PdfService {
   static Future<List<RenderedPdfPage>> renderAllPages(File file) async {
-    final document = await PdfDocument.openFile(file.path);
+    final document = await pdfrx.PdfDocument.openFile(file.path);
     final result = <RenderedPdfPage>[];
+
     try {
-      for (var pageNumber = 1; pageNumber <= document.pagesCount; pageNumber++) {
-        final page = await document.getPage(pageNumber);
+      for (final page in document.pages) {
+        final scale = math.min(2.0, 1800 / page.width);
+        final targetWidth = math.max(1, (page.width * scale).round());
+        final targetHeight = math.max(1, (page.height * scale).round());
+        final rendered = await page.render(
+          width: targetWidth,
+          height: targetHeight,
+          backgroundColor: 0xFFFFFFFF,
+        );
+
+        if (rendered == null) {
+          throw StateError('${page.pageNumber} 페이지 렌더링 실패');
+        }
+
         try {
-          final scale = math.min(2.0, 1800 / page.width);
-          final rendered = await page.render(
-            width: page.width * scale,
-            height: page.height * scale,
-            format: PdfPageImageFormat.png,
-            backgroundColor: '#FFFFFFFF',
-          );
-          if (rendered == null) throw StateError('$pageNumber 페이지 렌더링 실패');
-          result.add(RenderedPdfPage(
-            bytes: rendered.bytes,
-            width: page.width,
-            height: page.height,
-          ));
+          final image = await rendered.createImage();
+          try {
+            final byteData = await image.toByteData(
+              format: ui.ImageByteFormat.png,
+            );
+            if (byteData == null) {
+              throw StateError('${page.pageNumber} 페이지 이미지 변환 실패');
+            }
+            result.add(
+              RenderedPdfPage(
+                bytes: byteData.buffer.asUint8List(),
+                width: page.width,
+                height: page.height,
+              ),
+            );
+          } finally {
+            image.dispose();
+          }
         } finally {
-          await page.close();
+          rendered.dispose();
         }
       }
     } finally {
-      await document.close();
+      await document.dispose();
     }
+
     return result;
   }
 
@@ -58,22 +79,30 @@ class PdfService {
     required List<EditorItem> items,
     required String sourceName,
   }) async {
-    final pdf = pw.Document(compress: true);
+    final document = pw.Document(compress: true);
 
     for (var index = 0; index < pages.length; index++) {
       final page = pages[index];
-      final pageItems = items.where((e) => e.pageIndex == index).toList();
-      final pageFormat = PdfPageFormat(page.width, page.height);
+      final pageItems = items.where((item) => item.pageIndex == index).toList();
+      final pageFormat = pdf_core.PdfPageFormat(page.width, page.height);
       final background = pw.MemoryImage(page.bytes);
 
-      pdf.addPage(pw.Page(
-        pageFormat: pageFormat,
-        margin: pw.EdgeInsets.zero,
-        build: (_) => pw.Stack(children: [
-          pw.Positioned.fill(child: pw.Image(background, fit: pw.BoxFit.fill)),
-          ...pageItems.map((item) => _buildPdfItem(item, page.width, page.height)),
-        ]),
-      ));
+      document.addPage(
+        pw.Page(
+          pageFormat: pageFormat,
+          margin: pw.EdgeInsets.zero,
+          build: (_) => pw.Stack(
+            children: [
+              pw.Positioned.fill(
+                child: pw.Image(background, fit: pw.BoxFit.fill),
+              ),
+              ...pageItems.map(
+                (item) => _buildPdfItem(item, page.width, page.height),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     final directory = await getApplicationDocumentsDirectory();
@@ -83,41 +112,48 @@ class PdfService {
     final output = File(
       '${directory.path}/${safeName}_edited_${DateTime.now().millisecondsSinceEpoch}.pdf',
     );
-    await output.writeAsBytes(await pdf.save(), flush: true);
+    await output.writeAsBytes(await document.save(), flush: true);
     return output;
   }
 
-  static pw.Widget _buildPdfItem(EditorItem item, double width, double height) {
+  static pw.Widget _buildPdfItem(
+    EditorItem item,
+    double width,
+    double height,
+  ) {
     final left = item.x * width;
     final top = item.y * height;
     final itemWidth = item.width * width;
     final itemHeight = item.height * height;
 
-    pw.Widget child;
+    late pw.Widget child;
     switch (item.type) {
       case EditorItemType.text:
         child = pw.Text(
           item.text ?? '',
-          style: pw.TextStyle(fontSize: item.fontSize, color: PdfColor.fromInt(item.colorValue)),
+          style: pw.TextStyle(
+            fontSize: item.fontSize,
+            color: pdf_core.PdfColor.fromInt(item.colorValue),
+          ),
         );
-        break;
       case EditorItemType.check:
-        child = pw.Text('✓', style: pw.TextStyle(fontSize: itemHeight * .8));
-        break;
+        child = pw.Text(
+          '✓',
+          style: pw.TextStyle(fontSize: itemHeight * 0.8),
+        );
       case EditorItemType.signature:
       case EditorItemType.image:
       case EditorItemType.stamp:
         child = item.bytes == null
             ? pw.SizedBox()
             : pw.Image(pw.MemoryImage(item.bytes!), fit: pw.BoxFit.contain);
-        break;
       case EditorItemType.drawing:
         child = pw.CustomPaint(
-          size: PdfPoint(width, height),
+          size: pdf_core.PdfPoint(width, height),
           painter: (canvas, size) {
             if (item.points.length < 2) return;
             canvas
-              ..setStrokeColor(PdfColor.fromInt(item.colorValue))
+              ..setStrokeColor(pdf_core.PdfColor.fromInt(item.colorValue))
               ..setLineWidth(item.strokeWidth);
             final first = item.points.first;
             canvas.moveTo(first.dx * width, height - first.dy * height);
