@@ -27,6 +27,7 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           ref: ${{ github.head_ref || github.ref_name }}
 
+      # One-time source migration for the PDF viewport bug.
       - name: Apply pending PDF rendering and gesture fix
         if: github.event_name == 'pull_request' && github.head_ref == 'fix/pdf-render-pinch-zoom'
         run: |
