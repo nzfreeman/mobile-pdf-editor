@@ -18,23 +18,10 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
-      - name: Upgrade plugins and migrate FilePicker API
+      - name: Migrate FilePicker 11 API
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
-          pubspec = Path('pubspec.yaml')
-          text = pubspec.read_text()
-          replacements = {
-              'file_picker: ^10.3.10': 'file_picker: ^11.0.2',
-              'package_info_plus: ^9.0.1': 'package_info_plus: ^10.2.1',
-              'share_plus: ^12.0.2': 'share_plus: ^13.2.1',
-          }
-          for old, new in replacements.items():
-              if old not in text:
-                  raise SystemExit(f'Expected dependency not found: {old}')
-              text = text.replace(old, new)
-          pubspec.write_text(text)
 
           changed = []
           for path in Path('lib').rglob('*.dart'):
@@ -51,10 +38,14 @@ jobs:
         run: dart format lib
       - name: Analyze source
         run: flutter analyze --no-fatal-warnings --no-fatal-infos
-      - name: Commit upgrades
+      - name: Commit migration
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add pubspec.yaml pubspec.lock lib
-          git commit -m "Upgrade plugins for built-in Kotlin support"
-          git push
+          git add pubspec.lock lib
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit"
+          else
+            git commit -m "Migrate to FilePicker 11 API"
+            git push
+          fi
