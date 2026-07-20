@@ -37,6 +37,8 @@ class PdfService {
         final rendered = await page.render(
           width: targetWidth,
           height: targetHeight,
+          fullWidth: targetWidth.toDouble(),
+          fullHeight: targetHeight.toDouble(),
           backgroundColor: 0xFFFFFFFF,
         );
 
