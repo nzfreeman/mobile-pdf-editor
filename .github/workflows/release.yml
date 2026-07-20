@@ -85,7 +85,7 @@ jobs:
           cp build/app/outputs/bundle/release/app-release.aab mobile-pdf-editor-${GITHUB_REF_NAME}.aab
 
       - name: Upload workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mobile-pdf-editor-${{ github.ref_name }}
           path: |
