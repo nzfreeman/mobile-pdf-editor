@@ -89,9 +89,9 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       if (mounted) setState(() => _pages = pages);
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('PDF 로딩 실패: $error')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDF 로딩 실패: $error')),
+        );
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -154,8 +154,10 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
             child: const Text('취소'),
           ),
           FilledButton(
-            onPressed: () =>
-                Navigator.pop(dialogContext, controller.text.trim()),
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              controller.text.trim(),
+            ),
             child: const Text('확인'),
           ),
         ],
@@ -355,9 +357,9 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     final item = _selectedItem;
     if (item == null) return;
     setState(() => _clipboard = item.copy());
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('개체를 복사했습니다.')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('개체를 복사했습니다.')),
+    );
   }
 
   void _duplicateSelected() {
@@ -407,16 +409,13 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       if (item.type == EditorItemType.text) {
         item.fontSize = (item.fontSize * factor).clamp(8.0, 96.0).toDouble();
       } else if (item.type == EditorItemType.drawing) {
-        item.strokeWidth = (item.strokeWidth * factor)
-            .clamp(1.0, 16.0)
-            .toDouble();
+        item.strokeWidth =
+            (item.strokeWidth * factor).clamp(1.0, 16.0).toDouble();
       } else {
-        item.width = (item.width * factor)
-            .clamp(0.045, 1.0 - item.x)
-            .toDouble();
-        item.height = (item.height * factor)
-            .clamp(0.035, 1.0 - item.y)
-            .toDouble();
+        item.width =
+            (item.width * factor).clamp(0.045, 1.0 - item.x).toDouble();
+        item.height =
+            (item.height * factor).clamp(0.035, 1.0 - item.y).toDouble();
       }
     });
   }
@@ -440,12 +439,10 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
 
   void _updateStroke(DragUpdateDetails details, Size size) {
     if (!_drawingMode) return;
-    final dx = (details.localPosition.dx / size.width)
-        .clamp(0.0, 1.0)
-        .toDouble();
-    final dy = (details.localPosition.dy / size.height)
-        .clamp(0.0, 1.0)
-        .toDouble();
+    final dx =
+        (details.localPosition.dx / size.width).clamp(0.0, 1.0).toDouble();
+    final dy =
+        (details.localPosition.dy / size.height).clamp(0.0, 1.0).toDouble();
     setState(() => _activeStroke.add(DrawingPoint(dx, dy)));
   }
 
@@ -519,7 +516,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     try {
       final file = await _exportFile();
       if (file == null) return;
-      final savedPath = await FilePicker.platform.saveFile(
+      final savedPath = await FilePicker.saveFile(
         dialogTitle: '편집한 PDF 저장',
         fileName: _outputName,
         type: FileType.custom,
@@ -527,15 +524,15 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         bytes: await file.readAsBytes(),
       );
       if (savedPath != null && mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('PDF를 저장했습니다.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('PDF를 저장했습니다.')),
+        );
       }
     } catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('PDF 저장 실패: $error')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('PDF 저장 실패: $error')),
+        );
       }
     }
   }
@@ -568,8 +565,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   void _updateToolbarIndicator() {
     if (!_objectToolbarController.hasClients) return;
     final position = _objectToolbarController.position;
-    final show =
-        position.maxScrollExtent > 8 &&
+    final show = position.maxScrollExtent > 8 &&
         position.pixels < position.maxScrollExtent - 8;
     if (show != _showMoreToolsIndicator && mounted) {
       setState(() => _showMoreToolsIndicator = show);
@@ -660,31 +656,32 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _pages.isEmpty
-          ? const Center(child: Text('표시할 페이지가 없습니다.'))
-          : Column(
-              children: [
-                _buildInsertToolbar(),
-                Expanded(
-                  child: PageView.builder(
-                    controller: _pageController,
-                    physics:
-                        _drawingMode || _selectedId != null || _zoomScale > 1.01
-                        ? const NeverScrollableScrollPhysics()
-                        : const PageScrollPhysics(),
-                    itemCount: _pages.length,
-                    onPageChanged: (index) {
-                      setState(() {
-                        _pageIndex = index;
-                        _selectedId = null;
-                        _activeStroke = [];
-                      });
-                      _resetView();
-                    },
-                    itemBuilder: (_, index) => _buildPage(index),
-                  ),
+              ? const Center(child: Text('표시할 페이지가 없습니다.'))
+              : Column(
+                  children: [
+                    _buildInsertToolbar(),
+                    Expanded(
+                      child: PageView.builder(
+                        controller: _pageController,
+                        physics: _drawingMode ||
+                                _selectedId != null ||
+                                _zoomScale > 1.01
+                            ? const NeverScrollableScrollPhysics()
+                            : const PageScrollPhysics(),
+                        itemCount: _pages.length,
+                        onPageChanged: (index) {
+                          setState(() {
+                            _pageIndex = index;
+                            _selectedId = null;
+                            _activeStroke = [];
+                          });
+                          _resetView();
+                        },
+                        itemBuilder: (_, index) => _buildPage(index),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
       bottomNavigationBar: _pages.isEmpty
           ? null
           : Column(
@@ -773,8 +770,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
 
   Widget _buildObjectToolbar() {
     final selected = _selectedItem;
-    final supportsColor =
-        selected == null ||
+    final supportsColor = selected == null ||
         selected.type == EditorItemType.text ||
         selected.type == EditorItemType.check ||
         selected.type == EditorItemType.drawing;
@@ -882,9 +878,10 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [
-                          Theme.of(
-                            context,
-                          ).colorScheme.surface.withValues(alpha: 0),
+                          Theme.of(context)
+                              .colorScheme
+                              .surface
+                              .withValues(alpha: 0),
                           Theme.of(context).colorScheme.surface,
                           Theme.of(context).colorScheme.surface,
                         ],
@@ -1072,10 +1069,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       builder: (context, constraints) {
         const margin = 10.0;
         final availableWidth = math.max(1.0, constraints.maxWidth - margin * 2);
-        final availableHeight = math.max(
-          1.0,
-          constraints.maxHeight - margin * 2,
-        );
+        final availableHeight =
+            math.max(1.0, constraints.maxHeight - margin * 2);
         var pageWidth = availableWidth;
         var pageHeight = pageWidth / page.aspectRatio;
         if (pageHeight > availableHeight) {
@@ -1083,9 +1078,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
           pageWidth = pageHeight * page.aspectRatio;
         }
         final pageSize = Size(pageWidth, pageHeight);
-        final pageItems = _items
-            .where((item) => item.pageIndex == index)
-            .toList();
+        final pageItems =
+            _items.where((item) => item.pageIndex == index).toList();
 
         return Stack(
           children: [
@@ -1094,7 +1088,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 transformationController: _transformController,
                 constrained: true,
                 alignment: Alignment.center,
-                clipBehavior: Clip.none,
+                clipBehavior: Clip.hardEdge,
                 boundaryMargin: const EdgeInsets.all(300),
                 minScale: 1,
                 maxScale: 6,
@@ -1122,10 +1116,13 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                         if (!_drawingMode) setState(() => _selectedId = null);
                       },
                       onDoubleTap: _drawingMode ? null : _toggleZoom,
-                      onPanStart: (details) => _startStroke(details, pageSize),
-                      onPanUpdate: (details) =>
-                          _updateStroke(details, pageSize),
-                      onPanEnd: _endStroke,
+                      onPanStart: _drawingMode
+                          ? (details) => _startStroke(details, pageSize)
+                          : null,
+                      onPanUpdate: _drawingMode
+                          ? (details) => _updateStroke(details, pageSize)
+                          : null,
+                      onPanEnd: _drawingMode ? _endStroke : null,
                       child: Stack(
                         clipBehavior: Clip.none,
                         children: [
@@ -1184,9 +1181,10 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
               top: 8,
               right: 10,
               child: Material(
-                color: Theme.of(
-                  context,
-                ).colorScheme.inverseSurface.withValues(alpha: 0.82),
+                color: Theme.of(context)
+                    .colorScheme
+                    .inverseSurface
+                    .withValues(alpha: 0.82),
                 borderRadius: BorderRadius.circular(18),
                 child: InkWell(
                   onTap: _resetView,
