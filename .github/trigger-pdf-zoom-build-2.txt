@@ -1,0 +1,1 @@
+Second trigger marker to ensure a new pull_request synchronize event is emitted for the corrected PDF zoom APK build.
