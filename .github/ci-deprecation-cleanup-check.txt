@@ -1,0 +1,1 @@
+Validate deprecated API cleanup and unified update routing.
