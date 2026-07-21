@@ -4,14 +4,14 @@ on:
   push:
     branches: [main]
     paths:
-      - 'lib/screens/pdf_editor_screen.dart'
-      - 'lib/services/pdf_service.dart'
+      - 'lib/**'
       - 'pubspec.yaml'
+      - 'pubspec.lock'
       - '.github/workflows/build-corrected-pdf-zoom-apk.yml'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: corrected-pdf-zoom-apk-${{ github.ref }}
@@ -23,6 +23,25 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Normalize FilePicker 10 API
+        shell: bash
+        run: |
+          find lib -name '*.dart' -type f -print0 | xargs -0 sed -i \
+            -e 's/FilePicker\.pickFiles/FilePicker.platform.pickFiles/g' \
+            -e 's/FilePicker\.saveFile/FilePicker.platform.saveFile/g' \
+            -e 's/FilePicker\.getDirectoryPath/FilePicker.platform.getDirectoryPath/g'
+
+      - name: Commit normalized source
+        shell: bash
+        run: |
+          if ! git diff --quiet -- lib; then
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git add lib
+            git commit -m 'Normalize FilePicker API for 10.3.4'
+            git push
+          fi
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -39,10 +58,19 @@ jobs:
       - name: Show Flutter environment
         run: flutter --version
 
-      - name: Generate Android project files
-        run: flutter create --platforms=android .
+      - name: Clean generated state
+        shell: bash
+        run: |
+          rm -rf android .dart_tool build
+          rm -f pubspec.lock .flutter-plugins .flutter-plugins-dependencies
 
       - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Generate fresh Android project
+        run: flutter create --platforms=android .
+
+      - name: Resolve generated project dependencies
         run: flutter pub get
 
       - name: Check formatting
