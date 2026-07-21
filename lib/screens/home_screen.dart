@@ -229,7 +229,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _pickLocal() async {
     setState(() => _busy = true);
     try {
-      final result = await FilePicker.pickFiles(
+      final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: const ['pdf'],
       );

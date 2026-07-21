@@ -70,7 +70,7 @@ class _OrganizePdfScreenState extends State<OrganizePdfScreen> {
         sourceName: widget.fileName,
       );
       final base = widget.fileName.replaceAll(RegExp(r'\.[Pp][Dd][Ff]$'), '');
-      final result = await FilePicker.saveFile(
+      final result = await FilePicker.platform.saveFile(
         dialogTitle: '정리한 PDF 저장',
         fileName: '${base}_organized.pdf',
         type: FileType.custom,
