@@ -516,7 +516,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     try {
       final file = await _exportFile();
       if (file == null) return;
-      final savedPath = await FilePicker.platform.saveFile(
+      final savedPath = await FilePicker.saveFile(
         dialogTitle: '편집한 PDF 저장',
         fileName: _outputName,
         type: FileType.custom,
