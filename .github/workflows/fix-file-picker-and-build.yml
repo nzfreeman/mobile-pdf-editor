@@ -41,6 +41,9 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
+      - name: Generate Android project files
+        run: flutter create --platforms=android .
+
       - name: Check formatting
         run: dart format --output=none lib
 
