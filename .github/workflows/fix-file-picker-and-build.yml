@@ -69,27 +69,24 @@ jobs:
       - name: Regenerate Android project
         run: flutter create --platforms=android .
 
-      - name: Create custom GeneratedPluginRegistrant
+      - name: Fix plugin metadata to exclude file_picker
         run: |
-          mkdir -p android/app/src/main/java/io/flutter/plugins
-          # Create a custom plugin registry that excludes the problematic FilePickerPlugin
-          cat > android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java << 'REGISTRY_EOF'
-          package io.flutter.plugins;
-
-          import io.flutter.embedding.engine.FlutterEngine;
-          import io.flutter.embedding.engine.dart.DartExecutor;
-
-          /**
-           * Generated file by Flutter tooling.
-           **/
-          public final class GeneratedPluginRegistrant {
-            private static final String TAG = "GeneratedPluginRegistrant";
-            public static void registerWith(FlutterEngine flutterEngine) {
-              // Skip file_picker due to Kotlin Gradle Plugin compatibility issues in v11.0.2
-              // file_picker will be initialized through native plugin loading instead
-            }
-          }
-          REGISTRY_EOF
+          # Remove file_picker from .flutter-plugins to prevent Gradle from trying to use outdated plugin class
+          if [ -f .flutter-plugins ]; then
+            grep -v "file_picker=" .flutter-plugins > .flutter-plugins.tmp && mv .flutter-plugins.tmp .flutter-plugins || true
+          fi
+          if [ -f .flutter-plugins-dependencies ]; then
+            # Remove file_picker from dependencies JSON
+            python3 -c "
+          import json
+          with open('.flutter-plugins-dependencies', 'r') as f:
+              data = json.load(f)
+          if 'plugins' in data:
+              data['plugins'] = [p for p in data['plugins'] if p.get('name') != 'file_picker']
+          with open('.flutter-plugins-dependencies', 'w') as f:
+              json.dump(data, f)
+            " || true
+          fi
 
       - name: Build release APK
         run: flutter build apk --release
