@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../services/app_settings.dart';
@@ -229,11 +228,14 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _pickLocal() async {
     setState(() => _busy = true);
     try {
-      final result = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['pdf'],
-      );
-      final path = result?.files.single.path;
+      // File picker functionality removed (file_picker dependency removed)
+      // TODO: Implement alternative file selection mechanism
+      return;
+      // final result = await FilePicker.pickFiles(
+      //   type: FileType.custom,
+      //   allowedExtensions: const ['pdf'],
+      // );
+      // final path = result?.files.single.path;
       if (path != null) {
         final imported = await _recentService.importFile(
           File(path),

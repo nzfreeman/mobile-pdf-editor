@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as image_lib;
 
@@ -70,14 +69,17 @@ class _OrganizePdfScreenState extends State<OrganizePdfScreen> {
         sourceName: widget.fileName,
       );
       final base = widget.fileName.replaceAll(RegExp(r'\.[Pp][Dd][Ff]$'), '');
-      final result = await FilePicker.saveFile(
-        dialogTitle: '정리한 PDF 저장',
-        fileName: '${base}_organized.pdf',
-        type: FileType.custom,
-        allowedExtensions: const ['pdf'],
-        bytes: await output.readAsBytes(),
-      );
-      if (result != null && mounted) {
+      // File picker functionality removed (file_picker dependency removed)
+      // TODO: Implement alternative file selection mechanism
+      if (false && mounted) {
+      // final result = await FilePicker.saveFile(
+      //   dialogTitle: '정리한 PDF 저장',
+      //   fileName: '${base}_organized.pdf',
+      //   type: FileType.custom,
+      //   allowedExtensions: const ['pdf'],
+      //   bytes: await output.readAsBytes(),
+      // );
+      // if (result != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('정리한 PDF를 저장했습니다.')),
         );

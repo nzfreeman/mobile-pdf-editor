@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
@@ -23,12 +22,15 @@ class _ToolsScreenState extends State<ToolsScreen> {
   bool _busy = false;
 
   Future<File?> _pickPdf() async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['pdf'],
-    );
-    final path = result?.files.single.path;
-    return path == null ? null : File(path);
+    // File picker functionality removed (file_picker dependency removed)
+    // TODO: Implement alternative file selection mechanism
+    return null;
+    // final result = await FilePicker.pickFiles(
+    //   type: FileType.custom,
+    //   allowedExtensions: const ['pdf'],
+    // );
+    // final path = result?.files.single.path;
+    // return path == null ? null : File(path);
   }
 
   Future<void> _imageToPdf() async {
