@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - claude/github-actions-build-nz4se3
   pull_request:
     branches:
       - main

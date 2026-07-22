@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - claude/github-actions-build-nz4se3
     paths:
       - 'lib/**'
       - 'pubspec.yaml'
