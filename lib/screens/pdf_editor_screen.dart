@@ -506,11 +506,6 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     }
   }
 
-  String get _outputName {
-    final base = widget.fileName.replaceAll(RegExp(r'\.[Pp][Dd][Ff]$'), '');
-    return '${base}_edited.pdf';
-  }
-
   Future<void> _savePdf() async {
     // File picker functionality removed (file_picker dependency removed)
     // TODO: Implement alternative file selection mechanism
