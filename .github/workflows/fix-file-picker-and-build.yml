@@ -49,11 +49,20 @@ jobs:
       - name: Analyze source
         run: flutter analyze lib --no-fatal-warnings --no-fatal-infos
 
-      - name: Clear Gradle caches
+      - name: Clean Flutter project
+        run: flutter clean
+
+      - name: Clear Gradle and build caches
         run: |
           rm -rf ~/.gradle/caches
           rm -rf android/.gradle
           rm -rf build/
+
+      - name: Re-resolve dependencies
+        run: flutter pub get
+
+      - name: Regenerate Android project
+        run: flutter create --platforms=android .
 
       - name: Build release APK
         run: flutter build apk --release
