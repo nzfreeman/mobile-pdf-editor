@@ -34,14 +34,13 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Clean previous build artifacts
-        run: flutter clean
+      - name: Clean build artifacts and caches
+        run: |
+          flutter clean
+          rm -rf build .dart_tool
 
       - name: Resolve dependencies
         run: flutter pub get
-
-      - name: Generate fresh Android project files
-        run: flutter create --platforms=android .
 
       - name: Check formatting
         run: dart format --output=none lib
