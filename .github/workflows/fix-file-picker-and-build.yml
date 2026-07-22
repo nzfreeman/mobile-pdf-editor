@@ -40,6 +40,9 @@ jobs:
       - name: Generate Android project
         run: flutter create --platforms=android .
 
+      - name: Remove stale plugin registry
+        run: rm -f android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
+
       - name: Check formatting
         run: dart format --output=none lib
 
