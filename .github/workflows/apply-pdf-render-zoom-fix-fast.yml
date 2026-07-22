@@ -1,29 +1,42 @@
 name: Apply PDF render and zoom fix fast
 
 on:
-  issues:
-    types: [opened]
+  workflow_run:
+    workflows: ["Flutter CI"]
+    types: [completed]
 
 permissions:
   contents: write
-  issues: read
+
+env:
+  FLUTTER_VERSION: stable
 
 jobs:
-  patch:
-    if: github.event.issue.title == 'RUN PDF RENDER ZOOM FIX'
+  patch-and-build:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out main
+        uses: actions/checkout@v4
         with:
+          ref: main
           token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Patch PDF rendering and gestures
+
+      - name: Patch PDF rendering, gestures and version
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
+          changed = False
+
           service = Path('lib/services/pdf_service.dart')
           text = service.read_text()
           old = '''        final rendered = await page.render(
+            width: targetWidth,
+            height: targetHeight,
+            backgroundColor: 0xFFFFFFFF,
+          );'''
+          old_alt = '''        final rendered = await page.render(
           width: targetWidth,
           height: targetHeight,
           backgroundColor: 0xFFFFFFFF,
@@ -37,6 +50,10 @@ jobs:
         );'''
           if old in text:
               service.write_text(text.replace(old, new))
+              changed = True
+          elif old_alt in text:
+              service.write_text(text.replace(old_alt, new))
+              changed = True
           elif 'fullWidth: targetWidth.toDouble()' not in text:
               raise SystemExit('PdfPage.render block not found')
 
@@ -55,13 +72,55 @@ jobs:
                       onPanEnd: _drawingMode ? _endStroke : null,'''
           if old in text:
               editor.write_text(text.replace(old, new))
+              changed = True
           elif 'onPanStart: _drawingMode' not in text:
               raise SystemExit('Drawing gesture block not found')
+
+          pubspec = Path('pubspec.yaml')
+          text = pubspec.read_text()
+          if 'version: 0.4.2+8' in text:
+              pubspec.write_text(text.replace('version: 0.4.2+8', 'version: 0.4.3+9'))
+              changed = True
+
+          Path('/tmp/source_changed').write_text('1' if changed else '0')
           PY
-      - name: Commit source fix
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project files
+        run: flutter create --platforms=android .
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format and analyze
+        run: |
+          dart format lib/services/pdf_service.dart lib/screens/pdf_editor_screen.dart
+          flutter analyze lib --no-fatal-warnings --no-fatal-infos
+
+      - name: Commit corrected source
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add lib/services/pdf_service.dart lib/screens/pdf_editor_screen.dart
-          git diff --cached --quiet || git commit -m "Fix PDF rendering scale and pinch zoom gestures"
-          git push
+          git add lib/services/pdf_service.dart lib/screens/pdf_editor_screen.dart pubspec.yaml pubspec.lock
+          if ! git diff --cached --quiet; then
+            git commit -m "Fix PDF rendering scale and pinch zoom gestures"
+            git push origin main
+          fi
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Rename APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk mobile-pdf-editor-0.4.3+9.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-pdf-editor-0.4.3+9
+          path: mobile-pdf-editor-0.4.3+9.apk
+          if-no-files-found: error
