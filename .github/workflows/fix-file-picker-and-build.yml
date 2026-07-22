@@ -36,7 +36,6 @@ jobs:
 
       - name: Clean build artifacts and caches
         run: |
-          flutter clean
           rm -rf build .dart_tool
 
       - name: Resolve dependencies
