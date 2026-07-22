@@ -34,26 +34,8 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Clean build artifacts and caches
-        run: |
-          rm -rf build .dart_tool
-
       - name: Resolve dependencies
         run: flutter pub get
-
-      - name: Generate Android project files
-        run: flutter create --platforms=android .
-
-      - name: Regenerate plugin registry
-        run: |
-          flutter pub get
-          rm -f android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
-
-      - name: Fix old FilePicker plugin reference in generated registry
-        run: |
-          if [ -f "android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java" ]; then
-            sed -i 's/new com\.mr\.flutter\.plugin\.filepicker\.FilePickerPlugin()//' android/app/src/main/java/io/flutter/plugins/GeneratedPluginRegistrant.java
-          fi
 
       - name: Check formatting
         run: dart format --output=none lib
