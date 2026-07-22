@@ -22,12 +22,7 @@ class _ToolsScreenState extends State<ToolsScreen> {
   bool _busy = false;
 
   Future<File?> _pickPdf() async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['pdf'],
-    );
-    final path = result?.files.single.path;
-    return path == null ? null : File(path);
+    return null;
   }
 
   Future<void> _imageToPdf() async {

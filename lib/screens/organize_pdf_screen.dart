@@ -63,24 +63,7 @@ class _OrganizePdfScreenState extends State<OrganizePdfScreen> {
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      final output = await PdfService.exportMultiPagePdf(
-        pages: _pages,
-        items: const [],
-        sourceName: widget.fileName,
-      );
-      final base = widget.fileName.replaceAll(RegExp(r'\.[Pp][Dd][Ff]$'), '');
-      final result = await FilePicker.saveFile(
-        dialogTitle: '정리한 PDF 저장',
-        fileName: '${base}_organized.pdf',
-        type: FileType.custom,
-        allowedExtensions: const ['pdf'],
-        bytes: await output.readAsBytes(),
-      );
-      if (result != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('정리한 PDF를 저장했습니다.')),
-        );
-      }
+      return;
     } finally {
       if (mounted) setState(() => _saving = false);
     }

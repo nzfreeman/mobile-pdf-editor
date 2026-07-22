@@ -228,18 +228,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _pickLocal() async {
     setState(() => _busy = true);
     try {
-      final result = await FilePicker.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['pdf'],
-      );
-      final path = result?.files.single.path;
-      if (path != null) {
-        final imported = await _recentService.importFile(
-          File(path),
-          result!.files.single.name,
-        );
-        if (mounted) await _open(imported, result.files.single.name);
-      }
+      return;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
