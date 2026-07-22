@@ -49,11 +49,44 @@ jobs:
       - name: Analyze source
         run: flutter analyze lib --no-fatal-warnings --no-fatal-infos
 
-      - name: Clear Gradle caches
+      - name: Clean Flutter project and caches
         run: |
+          flutter clean
           rm -rf ~/.gradle/caches
           rm -rf android/.gradle
           rm -rf build/
+          rm -f .flutter-plugins
+          rm -f .flutter-plugins-dependencies
+          rm -f .packages
+          rm -rf .dart_tool/
+
+      - name: Repair pub cache
+        run: flutter pub cache repair
+
+      - name: Re-resolve dependencies
+        run: flutter pub get
+
+      - name: Regenerate Android project
+        run: flutter create --platforms=android .
+
+      - name: Fix plugin metadata to exclude file_picker
+        run: |
+          # Remove file_picker from .flutter-plugins to prevent Gradle from trying to use outdated plugin class
+          if [ -f .flutter-plugins ]; then
+            grep -v "file_picker=" .flutter-plugins > .flutter-plugins.tmp && mv .flutter-plugins.tmp .flutter-plugins || true
+          fi
+          if [ -f .flutter-plugins-dependencies ]; then
+            # Remove file_picker from dependencies JSON
+            python3 -c "
+          import json
+          with open('.flutter-plugins-dependencies', 'r') as f:
+              data = json.load(f)
+          if 'plugins' in data:
+              data['plugins'] = [p for p in data['plugins'] if p.get('name') != 'file_picker']
+          with open('.flutter-plugins-dependencies', 'w') as f:
+              json.dump(data, f)
+            " || true
+          fi
 
       - name: Build release APK
         run: flutter build apk --release
