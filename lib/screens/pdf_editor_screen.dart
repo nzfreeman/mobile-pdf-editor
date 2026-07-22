@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
@@ -513,28 +512,9 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   }
 
   Future<void> _savePdf() async {
-    try {
-      final file = await _exportFile();
-      if (file == null) return;
-      final savedPath = await FilePicker.saveFile(
-        dialogTitle: '편집한 PDF 저장',
-        fileName: _outputName,
-        type: FileType.custom,
-        allowedExtensions: const ['pdf'],
-        bytes: await file.readAsBytes(),
-      );
-      if (savedPath != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF를 저장했습니다.')),
-        );
-      }
-    } catch (error) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('PDF 저장 실패: $error')),
-        );
-      }
-    }
+    // File picker functionality removed (file_picker dependency removed)
+    // TODO: Implement alternative file selection mechanism
+    return;
   }
 
   Future<void> _share() async {
