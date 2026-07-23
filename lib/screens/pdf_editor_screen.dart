@@ -1042,10 +1042,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     final page = _pages[index];
     return LayoutBuilder(
       builder: (context, constraints) {
-        const margin = 10.0;
-        final availableWidth = math.max(1.0, constraints.maxWidth - margin * 2);
-        final availableHeight =
-            math.max(1.0, constraints.maxHeight - margin * 2);
+        final availableWidth = math.max(1.0, constraints.maxWidth);
+        final availableHeight = math.max(1.0, constraints.maxHeight);
         var pageWidth = availableWidth;
         var pageHeight = pageWidth / page.aspectRatio;
         if (pageHeight > availableHeight) {
@@ -1061,14 +1059,14 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
             Positioned.fill(
               child: InteractiveViewer(
                 transformationController: _transformController,
-                constrained: true,
+                constrained: false,
                 alignment: Alignment.center,
                 clipBehavior: Clip.hardEdge,
-                boundaryMargin: const EdgeInsets.all(300),
-                minScale: 1,
-                maxScale: 6,
-                panEnabled: !_drawingMode,
-                scaleEnabled: !_drawingMode,
+                boundaryMargin: const EdgeInsets.all(100),
+                minScale: 0.5,
+                maxScale: 8,
+                panEnabled: true,
+                scaleEnabled: true,
                 onInteractionUpdate: (_) {
                   final scale = _transformController.value.getMaxScaleOnAxis();
                   if ((scale - _zoomScale).abs() > 0.02) {
