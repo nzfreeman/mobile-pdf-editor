@@ -1,0 +1,1 @@
+Trigger a fresh Flutter CI run so the workflow_run job applies the PDF rendering and pinch-zoom source fixes, bumps the app version, and builds the corrected APK.
