@@ -79,11 +79,13 @@ class AppUpdateService {
       _updateInfo = info;
       final available =
           info.updateAvailability == UpdateAvailability.updateAvailable ||
-              info.updateAvailability ==
-                  UpdateAvailability.developerTriggeredUpdateInProgress;
+          info.updateAvailability ==
+              UpdateAvailability.developerTriggeredUpdateInProgress;
 
       return AppUpdateState(
-        status: available ? AppUpdateStatus.available : AppUpdateStatus.upToDate,
+        status: available
+            ? AppUpdateStatus.available
+            : AppUpdateStatus.upToDate,
         source: AppUpdateSource.googlePlay,
         currentVersion: currentVersion,
         availableVersionCode: info.availableVersionCode,
@@ -108,13 +110,15 @@ class AppUpdateService {
     String currentVersion,
   ) async {
     try {
-      final response = await http.get(
-        _latestReleaseApi,
-        headers: const {
-          'Accept': 'application/vnd.github+json',
-          'X-GitHub-Api-Version': '2022-11-28',
-        },
-      ).timeout(const Duration(seconds: 15));
+      final response = await http
+          .get(
+            _latestReleaseApi,
+            headers: const {
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+            },
+          )
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode != 200) {
         throw HttpException('GitHub 응답 코드 ${response.statusCode}');
       }
@@ -127,13 +131,10 @@ class AppUpdateService {
       final assets = (json['assets'] as List<dynamic>? ?? const [])
           .whereType<Map<String, dynamic>>()
           .toList();
-      final apkAsset = assets.cast<Map<String, dynamic>?>().firstWhere(
-            (asset) {
-              final name = (asset?['name'] as String? ?? '').toLowerCase();
-              return name.endsWith('.apk');
-            },
-            orElse: () => null,
-          );
+      final apkAsset = assets.cast<Map<String, dynamic>?>().firstWhere((asset) {
+        final name = (asset?['name'] as String? ?? '').toLowerCase();
+        return name.endsWith('.apk');
+      }, orElse: () => null);
       final downloadUrl = Uri.tryParse(
         apkAsset?['browser_download_url'] as String? ?? '',
       );
@@ -145,16 +146,16 @@ class AppUpdateService {
       final available = _compareVersions(latestParts, currentParts) > 0;
 
       return AppUpdateState(
-        status: available ? AppUpdateStatus.available : AppUpdateStatus.upToDate,
+        status: available
+            ? AppUpdateStatus.available
+            : AppUpdateStatus.upToDate,
         source: AppUpdateSource.github,
         currentVersion: currentVersion,
         latestVersion: latestVersion.isEmpty ? null : latestVersion,
         downloadUrl: downloadUrl,
         releasePageUrl: releasePage,
         releaseNotes: releaseNotes.isEmpty ? null : releaseNotes,
-        message: available
-            ? 'GitHub에 새 APK 버전이 있습니다.'
-            : 'GitHub 최신 버전입니다.',
+        message: available ? 'GitHub에 새 APK 버전이 있습니다.' : 'GitHub 최신 버전입니다.',
       );
     } catch (error) {
       return AppUpdateState(
@@ -168,8 +169,9 @@ class AppUpdateService {
 
   List<int> _versionParts(String value) {
     final normalized = value.replaceFirst(RegExp(r'^[vV]'), '');
-    final match = RegExp(r'^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\+(\d+))?')
-        .firstMatch(normalized);
+    final match = RegExp(
+      r'^(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\+(\d+))?',
+    ).firstMatch(normalized);
     if (match == null) return const [0, 0, 0, 0];
     return List<int>.generate(
       4,
@@ -179,7 +181,9 @@ class AppUpdateService {
 
   int _compareVersions(List<int> left, List<int> right) {
     for (var index = 0; index < 4; index++) {
-      if (left[index] != right[index]) return left[index].compareTo(right[index]);
+      if (left[index] != right[index]) {
+        return left[index].compareTo(right[index]);
+      }
     }
     return 0;
   }
@@ -261,20 +265,20 @@ class AppUpdateService {
       final result = await InAppUpdate.performImmediateUpdate();
       return switch (result) {
         AppUpdateResult.success => const AppUpdateState(
-            status: AppUpdateStatus.completed,
-            source: AppUpdateSource.googlePlay,
-            message: '업데이트가 완료되었습니다.',
-          ),
+          status: AppUpdateStatus.completed,
+          source: AppUpdateSource.googlePlay,
+          message: '업데이트가 완료되었습니다.',
+        ),
         AppUpdateResult.userDeniedUpdate => const AppUpdateState(
-            status: AppUpdateStatus.cancelled,
-            source: AppUpdateSource.googlePlay,
-            message: '업데이트가 취소되었습니다.',
-          ),
+          status: AppUpdateStatus.cancelled,
+          source: AppUpdateSource.googlePlay,
+          message: '업데이트가 취소되었습니다.',
+        ),
         AppUpdateResult.inAppUpdateFailed => const AppUpdateState(
-            status: AppUpdateStatus.failed,
-            source: AppUpdateSource.googlePlay,
-            message: '업데이트에 실패했습니다.',
-          ),
+          status: AppUpdateStatus.failed,
+          source: AppUpdateSource.googlePlay,
+          message: '업데이트에 실패했습니다.',
+        ),
       };
     } catch (error) {
       return AppUpdateState(

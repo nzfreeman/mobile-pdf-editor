@@ -140,10 +140,7 @@ class PdfService {
         );
         break;
       case EditorItemType.check:
-        child = pw.Text(
-          '✓',
-          style: pw.TextStyle(fontSize: itemHeight * 0.8),
-        );
+        child = pw.Text('✓', style: pw.TextStyle(fontSize: itemHeight * 0.8));
         break;
       case EditorItemType.signature:
       case EditorItemType.image:

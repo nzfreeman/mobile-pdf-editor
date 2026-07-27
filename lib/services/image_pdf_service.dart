@@ -18,9 +18,8 @@ class ImagePdfService {
         pw.Page(
           pageFormat: PdfPageFormat.a4,
           margin: const pw.EdgeInsets.all(18),
-          build: (_) => pw.Center(
-            child: pw.Image(image, fit: pw.BoxFit.contain),
-          ),
+          build: (_) =>
+              pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain)),
         ),
       );
     }

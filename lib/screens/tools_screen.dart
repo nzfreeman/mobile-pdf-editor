@@ -5,6 +5,7 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 
+import '../services/android_file_service.dart';
 import '../services/app_settings.dart';
 import '../services/image_pdf_service.dart';
 import 'organize_pdf_screen.dart';
@@ -21,16 +22,17 @@ class _ToolsScreenState extends State<ToolsScreen> {
   final _picker = ImagePicker();
   bool _busy = false;
 
-  Future<File?> _pickPdf() async {
-    // File picker functionality removed (file_picker dependency removed)
-    // TODO: Implement alternative file selection mechanism
-    return null;
-    // final result = await FilePicker.pickFiles(
-    //   type: FileType.custom,
-    //   allowedExtensions: const ['pdf'],
-    // );
-    // final path = result?.files.single.path;
-    // return path == null ? null : File(path);
+  Future<SelectedPdfFile?> _pickPdf() async {
+    try {
+      return await AndroidFileService.pickPdf();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('PDF 선택 실패: $error')));
+      }
+      return null;
+    }
   }
 
   Future<void> _imageToPdf() async {
@@ -45,10 +47,7 @@ class _ToolsScreenState extends State<ToolsScreen> {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => PdfEditorScreen(
-            pdfFile: pdf,
-            fileName: 'images.pdf',
-          ),
+          builder: (_) => PdfEditorScreen(pdfFile: pdf, fileName: 'images.pdf'),
         ),
       );
     } finally {
@@ -68,10 +67,7 @@ class _ToolsScreenState extends State<ToolsScreen> {
         sourcePath: captured.path,
         compressQuality: 94,
         uiSettings: [
-          AndroidUiSettings(
-            toolbarTitle: '문서 자르기',
-            lockAspectRatio: false,
-          ),
+          AndroidUiSettings(toolbarTitle: '문서 자르기', lockAspectRatio: false),
         ],
       );
       if (cropped == null) return;
@@ -80,10 +76,7 @@ class _ToolsScreenState extends State<ToolsScreen> {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => PdfEditorScreen(
-            pdfFile: pdf,
-            fileName: 'scan.pdf',
-          ),
+          builder: (_) => PdfEditorScreen(pdfFile: pdf, fileName: 'scan.pdf'),
         ),
       );
     } finally {
@@ -92,29 +85,31 @@ class _ToolsScreenState extends State<ToolsScreen> {
   }
 
   Future<void> _organize() async {
-    final file = await _pickPdf();
-    if (file == null || !mounted) return;
+    final selected = await _pickPdf();
+    if (selected == null || !mounted) return;
     await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => OrganizePdfScreen(
-          file: file,
-          fileName: file.uri.pathSegments.last,
+          file: File(selected.path),
+          fileName: selected.name,
         ),
       ),
     );
   }
 
   Future<void> _printPdf() async {
-    final file = await _pickPdf();
-    if (file == null) return;
-    await Printing.layoutPdf(onLayout: (_) => file.readAsBytes());
+    final selected = await _pickPdf();
+    if (selected == null) return;
+    await Printing.layoutPdf(
+      onLayout: (_) => File(selected.path).readAsBytes(),
+    );
   }
 
   void _comingSoon(String name) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('$name 기능은 다음 단계에서 추가됩니다.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('$name 기능은 다음 단계에서 추가됩니다.')));
   }
 
   @override
@@ -124,14 +119,14 @@ class _ToolsScreenState extends State<ToolsScreen> {
       _ToolData('문서 스캔', Icons.document_scanner_outlined, _scanToPdf),
       _ToolData('페이지 구성', Icons.grid_view_rounded, _organize),
       _ToolData('PDF 편집', Icons.edit_document, () async {
-        final file = await _pickPdf();
-        if (file == null || !mounted) return;
+        final selected = await _pickPdf();
+        if (selected == null || !context.mounted) return;
         await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => PdfEditorScreen(
-              pdfFile: file,
-              fileName: file.uri.pathSegments.last,
+              pdfFile: File(selected.path),
+              fileName: selected.name,
             ),
           ),
         );

@@ -18,7 +18,7 @@ class PdfEditorApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: AppSettings.themeMode,
-      builder: (_, themeMode, __) => MaterialApp(
+      builder: (context, themeMode, child) => MaterialApp(
         debugShowCheckedModeBanner: false,
         title: 'Mobile PDF Editor',
         themeMode: themeMode,

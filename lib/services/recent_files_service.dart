@@ -24,7 +24,10 @@ class RecentFilesService {
       }
     }
     if (result.length != paths.length) {
-      await preferences.setStringList(_key, result.map((file) => file.path).toList());
+      await preferences.setStringList(
+        _key,
+        result.map((file) => file.path).toList(),
+      );
     }
     return result;
   }
@@ -33,7 +36,10 @@ class RecentFilesService {
     final directory = await getApplicationDocumentsDirectory();
     final recentDirectory = Directory('${directory.path}/recent_pdfs');
     await recentDirectory.create(recursive: true);
-    final safeName = originalName.replaceAll(RegExp(r'[^a-zA-Z0-9가-힣._-]'), '_');
+    final safeName = originalName.replaceAll(
+      RegExp(r'[^a-zA-Z0-9가-힣._-]'),
+      '_',
+    );
     final target = File(
       '${recentDirectory.path}/${DateTime.now().millisecondsSinceEpoch}_$safeName',
     );

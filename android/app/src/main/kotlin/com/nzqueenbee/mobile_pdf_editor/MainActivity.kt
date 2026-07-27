@@ -1,0 +1,136 @@
+package com.nzqueenbee.mobile_pdf_editor
+
+import android.app.Activity
+import android.content.Intent
+import android.database.Cursor
+import android.net.Uri
+import android.provider.OpenableColumns
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import java.io.File
+import java.io.FileInputStream
+
+class MainActivity : FlutterActivity() {
+    private val channelName = "mobile_pdf_editor/file_io"
+    private val pickPdfRequest = 7301
+    private val savePdfRequest = 7302
+
+    private var pendingPickResult: MethodChannel.Result? = null
+    private var pendingSaveResult: MethodChannel.Result? = null
+    private var pendingSavePath: String? = null
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "pickPdf" -> pickPdf(result)
+                    "savePdf" -> savePdf(call, result)
+                    else -> result.notImplemented()
+                }
+            }
+    }
+
+    private fun pickPdf(result: MethodChannel.Result) {
+        if (pendingPickResult != null) {
+            result.error("busy", "A PDF picker is already open.", null)
+            return
+        }
+        pendingPickResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/pdf"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(intent, pickPdfRequest)
+    }
+
+    private fun savePdf(call: MethodCall, result: MethodChannel.Result) {
+        if (pendingSaveResult != null) {
+            result.error("busy", "A PDF save dialog is already open.", null)
+            return
+        }
+        val sourcePath = call.argument<String>("sourcePath")
+        val fileName = sanitizeFileName(call.argument<String>("fileName") ?: "document.pdf")
+        if (sourcePath.isNullOrBlank() || !File(sourcePath).exists()) {
+            result.error("missing_source", "The PDF source file does not exist.", null)
+            return
+        }
+        pendingSavePath = sourcePath
+        pendingSaveResult = result
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_TITLE, fileName)
+        }
+        startActivityForResult(intent, savePdfRequest)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        when (requestCode) {
+            pickPdfRequest -> completePick(resultCode, data?.data)
+            savePdfRequest -> completeSave(resultCode, data?.data)
+        }
+    }
+
+    private fun completePick(resultCode: Int, uri: Uri?) {
+        val result = pendingPickResult ?: return
+        pendingPickResult = null
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            result.success(null)
+            return
+        }
+        try {
+            val displayName = queryDisplayName(uri) ?: "selected.pdf"
+            val target = File(cacheDir, "picked_${System.currentTimeMillis()}_${sanitizeFileName(displayName)}")
+            contentResolver.openInputStream(uri).use { input ->
+                if (input == null) throw IllegalStateException("Unable to open selected PDF.")
+                target.outputStream().use { output -> input.copyTo(output) }
+            }
+            result.success(mapOf("path" to target.absolutePath, "name" to displayName))
+        } catch (error: Exception) {
+            result.error("pick_failed", error.message, null)
+        }
+    }
+
+    private fun completeSave(resultCode: Int, uri: Uri?) {
+        val result = pendingSaveResult ?: return
+        val sourcePath = pendingSavePath
+        pendingSaveResult = null
+        pendingSavePath = null
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            result.success(false)
+            return
+        }
+        try {
+            if (sourcePath.isNullOrBlank()) throw IllegalStateException("Missing source PDF.")
+            FileInputStream(File(sourcePath)).use { input ->
+                contentResolver.openOutputStream(uri).use { output ->
+                    if (output == null) throw IllegalStateException("Unable to open save destination.")
+                    input.copyTo(output)
+                }
+            }
+            result.success(true)
+        } catch (error: Exception) {
+            result.error("save_failed", error.message, null)
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        val cursor: Cursor? = contentResolver.query(uri, null, null, null, null)
+        cursor.use {
+            if (it == null || !it.moveToFirst()) return null
+            val index = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index < 0) return null
+            return it.getString(index)
+        }
+    }
+
+    private fun sanitizeFileName(value: String): String {
+        return value.replace(Regex("[^A-Za-z0-9가-힣._-]"), "_")
+    }
+}

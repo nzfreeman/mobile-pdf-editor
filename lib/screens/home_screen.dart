@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../services/android_file_service.dart';
 import '../services/app_settings.dart';
 import '../services/app_update_service.dart';
 import '../services/recent_files_service.dart';
@@ -108,9 +109,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       Expanded(
                         child: Text(
                           '앱 업데이트',
-                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                       ),
                       IconButton(
@@ -228,20 +228,19 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _pickLocal() async {
     setState(() => _busy = true);
     try {
-      // File picker functionality removed (file_picker dependency removed)
-      // TODO: Implement alternative file selection mechanism
-      return;
-      // final result = await FilePicker.pickFiles(
-      //   type: FileType.custom,
-      //   allowedExtensions: const ['pdf'],
-      // );
-      // final path = result?.files.single.path;
-      if (path != null) {
-        final imported = await _recentService.importFile(
-          File(path),
-          result!.files.single.name,
-        );
-        if (mounted) await _open(imported, result.files.single.name);
+      final selected = await AndroidFileService.pickPdf();
+      if (selected == null) return;
+
+      final imported = await _recentService.importFile(
+        File(selected.path),
+        selected.name,
+      );
+      if (mounted) await _open(imported, selected.name);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('PDF 열기 실패: $error')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -299,9 +298,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       const SizedBox(height: 12),
                       Text(
                         'PDF 읽기 및 편집',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
                       const Text(
@@ -323,7 +321,9 @@ class _HomeScreenState extends State<HomeScreen> {
                         child: OutlinedButton.icon(
                           onPressed: () => Navigator.push(
                             context,
-                            MaterialPageRoute(builder: (_) => const ToolsScreen()),
+                            MaterialPageRoute(
+                              builder: (_) => const ToolsScreen(),
+                            ),
                           ),
                           icon: const Icon(Icons.grid_view_rounded),
                           label: const Text('PDF 도구'),
@@ -339,8 +339,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   Text(
                     '최근 파일',
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const Spacer(),
                   Text('${_recentFiles.length}개'),
@@ -358,7 +358,10 @@ class _HomeScreenState extends State<HomeScreen> {
                 ..._recentFiles.map(
                   (recent) => Card(
                     child: ListTile(
-                      leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+                      leading: const Icon(
+                        Icons.picture_as_pdf,
+                        color: Colors.red,
+                      ),
                       title: Text(
                         recent.name,
                         maxLines: 1,

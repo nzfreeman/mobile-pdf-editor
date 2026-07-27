@@ -72,7 +72,9 @@ class EditorItem {
       width: width ?? this.width,
       height: height ?? this.height,
       text: text ?? this.text,
-      bytes: bytes ?? (this.bytes == null ? null : Uint8List.fromList(this.bytes!)),
+      bytes:
+          bytes ??
+          (this.bytes == null ? null : Uint8List.fromList(this.bytes!)),
       fontSize: fontSize ?? this.fontSize,
       rotation: rotation ?? this.rotation,
       points: points ?? List<DrawingPoint>.from(this.points),

@@ -3,10 +3,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as image_lib;
 
+import '../services/android_file_service.dart';
 import '../services/pdf_service.dart';
 
 class OrganizePdfScreen extends StatefulWidget {
-  const OrganizePdfScreen({super.key, required this.file, required this.fileName});
+  const OrganizePdfScreen({
+    super.key,
+    required this.file,
+    required this.fileName,
+  });
 
   final File file;
   final String fileName;
@@ -37,9 +42,9 @@ class _OrganizePdfScreenState extends State<OrganizePdfScreen> {
 
   void _delete(int index) {
     if (_pages.length <= 1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('PDF에는 최소 한 페이지가 필요합니다.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('PDF에는 최소 한 페이지가 필요합니다.')));
       return;
     }
     setState(() => _pages.removeAt(index));
@@ -69,20 +74,20 @@ class _OrganizePdfScreenState extends State<OrganizePdfScreen> {
         sourceName: widget.fileName,
       );
       final base = widget.fileName.replaceAll(RegExp(r'\.[Pp][Dd][Ff]$'), '');
-      // File picker functionality removed (file_picker dependency removed)
-      // TODO: Implement alternative file selection mechanism
-      if (false && mounted) {
-      // final result = await FilePicker.saveFile(
-      //   dialogTitle: '정리한 PDF 저장',
-      //   fileName: '${base}_organized.pdf',
-      //   type: FileType.custom,
-      //   allowedExtensions: const ['pdf'],
-      //   bytes: await output.readAsBytes(),
-      // );
-      // if (result != null && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('정리한 PDF를 저장했습니다.')),
-        );
+      final saved = await AndroidFileService.savePdf(
+        sourcePath: output.path,
+        fileName: '${base}_organized.pdf',
+      );
+      if (saved && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('정리한 PDF를 저장했습니다.')));
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('PDF 저장 실패: $error')));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
