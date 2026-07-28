@@ -8,8 +8,12 @@ import 'package:printing/printing.dart';
 import '../services/android_file_service.dart';
 import '../services/app_settings.dart';
 import '../services/image_pdf_service.dart';
+import 'compress_pdf_screen.dart';
+import 'merge_pdf_screen.dart';
+import 'ocr_screen.dart';
 import 'organize_pdf_screen.dart';
 import 'pdf_editor_screen.dart';
+import 'split_pdf_screen.dart';
 
 class ToolsScreen extends StatefulWidget {
   const ToolsScreen({super.key});
@@ -98,6 +102,70 @@ class _ToolsScreenState extends State<ToolsScreen> {
     );
   }
 
+  Future<void> _mergePdfs() async {
+    setState(() => _busy = true);
+    List<SelectedPdfFile> picked;
+    try {
+      picked = await AndroidFileService.pickMultiplePdfs();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('PDF 선택 실패: $error')));
+      }
+      return;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (picked.isEmpty || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => MergePdfScreen(initialFiles: picked)),
+    );
+  }
+
+  Future<void> _splitPdf() async {
+    final selected = await _pickPdf();
+    if (selected == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SplitPdfScreen(
+          file: File(selected.path),
+          fileName: selected.name,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _compressPdf() async {
+    final selected = await _pickPdf();
+    if (selected == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CompressPdfScreen(
+          file: File(selected.path),
+          fileName: selected.name,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _ocr() async {
+    final selected = await _pickPdf();
+    if (selected == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => OcrScreen(
+          pdfFile: File(selected.path),
+          fileName: selected.name,
+        ),
+      ),
+    );
+  }
+
   Future<void> _printPdf() async {
     final selected = await _pickPdf();
     if (selected == null) return;
@@ -138,12 +206,12 @@ class _ToolsScreenState extends State<ToolsScreen> {
             : ThemeMode.dark;
         await AppSettings.setThemeMode(next);
       }),
-      _ToolData('PDF 병합', Icons.call_merge, () => _comingSoon('PDF 병합')),
-      _ToolData('PDF 분할', Icons.call_split, () => _comingSoon('PDF 분할')),
-      _ToolData('PDF 압축', Icons.compress, () => _comingSoon('PDF 압축')),
+      _ToolData('PDF 병합', Icons.call_merge, _mergePdfs),
+      _ToolData('PDF 분할', Icons.call_split, _splitPdf),
+      _ToolData('PDF 압축', Icons.compress, _compressPdf),
       _ToolData('PDF 잠금', Icons.lock_outline, () => _comingSoon('PDF 잠금')),
       _ToolData('잠금 해제', Icons.lock_open, () => _comingSoon('잠금 해제')),
-      _ToolData('OCR', Icons.text_snippet_outlined, () => _comingSoon('OCR')),
+      _ToolData('OCR', Icons.text_snippet_outlined, _ocr),
     ];
 
     return Scaffold(

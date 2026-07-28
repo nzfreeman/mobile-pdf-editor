@@ -16,10 +16,12 @@ class MainActivity : FlutterActivity() {
     private val channelName = "mobile_pdf_editor/file_io"
     private val pickPdfRequest = 7301
     private val savePdfRequest = 7302
+    private val pickMultiplePdfsRequest = 7303
 
     private var pendingPickResult: MethodChannel.Result? = null
     private var pendingSaveResult: MethodChannel.Result? = null
     private var pendingSavePath: String? = null
+    private var pendingPickMultipleResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -27,6 +29,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "pickPdf" -> pickPdf(result)
+                    "pickMultiplePdfs" -> pickMultiplePdfs(result)
                     "savePdf" -> savePdf(call, result)
                     else -> result.notImplemented()
                 }
@@ -45,6 +48,21 @@ class MainActivity : FlutterActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivityForResult(intent, pickPdfRequest)
+    }
+
+    private fun pickMultiplePdfs(result: MethodChannel.Result) {
+        if (pendingPickMultipleResult != null) {
+            result.error("busy", "A PDF picker is already open.", null)
+            return
+        }
+        pendingPickMultipleResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(intent, pickMultiplePdfsRequest)
     }
 
     private fun savePdf(call: MethodCall, result: MethodChannel.Result) {
@@ -74,6 +92,7 @@ class MainActivity : FlutterActivity() {
         when (requestCode) {
             pickPdfRequest -> completePick(resultCode, data?.data)
             savePdfRequest -> completeSave(resultCode, data?.data)
+            pickMultiplePdfsRequest -> completePickMultiple(resultCode, data)
         }
     }
 
@@ -92,6 +111,41 @@ class MainActivity : FlutterActivity() {
                 target.outputStream().use { output -> input.copyTo(output) }
             }
             result.success(mapOf("path" to target.absolutePath, "name" to displayName))
+        } catch (error: Exception) {
+            result.error("pick_failed", error.message, null)
+        }
+    }
+
+    private fun completePickMultiple(resultCode: Int, data: Intent?) {
+        val result = pendingPickMultipleResult ?: return
+        pendingPickMultipleResult = null
+        if (resultCode != Activity.RESULT_OK || data == null) {
+            result.success(emptyList<Map<String, String>>())
+            return
+        }
+        val uris = mutableListOf<Uri>()
+        val clipData = data.clipData
+        if (clipData != null) {
+            for (i in 0 until clipData.itemCount) {
+                uris.add(clipData.getItemAt(i).uri)
+            }
+        } else {
+            data.data?.let { uris.add(it) }
+        }
+        try {
+            val picked = uris.map { uri ->
+                val displayName = queryDisplayName(uri) ?: "selected.pdf"
+                val target = File(
+                    cacheDir,
+                    "picked_${System.currentTimeMillis()}_${uris.indexOf(uri)}_${sanitizeFileName(displayName)}"
+                )
+                contentResolver.openInputStream(uri).use { input ->
+                    if (input == null) throw IllegalStateException("Unable to open selected PDF.")
+                    target.outputStream().use { output -> input.copyTo(output) }
+                }
+                mapOf("path" to target.absolutePath, "name" to displayName)
+            }
+            result.success(picked)
         } catch (error: Exception) {
             result.error("pick_failed", error.message, null)
         }

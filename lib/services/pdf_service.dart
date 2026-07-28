@@ -3,12 +3,15 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart' as pdf_core;
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdfrx/pdfrx.dart' as pdfrx;
 
 import '../models/editor_item.dart';
+
+enum PdfCompressionLevel { low, medium, high }
 
 class RenderedPdfPage {
   const RenderedPdfPage({
@@ -118,6 +121,81 @@ class PdfService {
     return output;
   }
 
+  /// Renders and concatenates every page of [files], in order, into a single
+  /// PDF.
+  static Future<File> mergePdfFiles({
+    required List<File> files,
+    required String sourceName,
+  }) async {
+    final pages = <RenderedPdfPage>[];
+    for (final file in files) {
+      pages.addAll(await renderAllPages(file));
+    }
+    return exportMultiPagePdf(pages: pages, items: const [], sourceName: sourceName);
+  }
+
+  /// Splits [file] into one output PDF per group of (0-based) page indices
+  /// in [pageGroups], preserving the order given.
+  static Future<List<File>> splitPdf({
+    required File file,
+    required List<List<int>> pageGroups,
+    required String sourceName,
+  }) async {
+    final pages = await renderAllPages(file);
+    final outputs = <File>[];
+    for (var i = 0; i < pageGroups.length; i++) {
+      final subset = pageGroups[i].map((index) => pages[index]).toList();
+      outputs.add(
+        await exportMultiPagePdf(
+          pages: subset,
+          items: const [],
+          sourceName: '${sourceName.replaceAll(RegExp(r'\.[Pp][Dd][Ff]$'), '')}_part${i + 1}',
+        ),
+      );
+    }
+    return outputs;
+  }
+
+  /// Re-encodes every page as a quality/size-reduced JPEG and rebuilds the
+  /// PDF, which shrinks output size considerably versus the lossless PNG
+  /// pages produced by [renderAllPages].
+  static Future<File> compressPdf({
+    required File file,
+    required String sourceName,
+    PdfCompressionLevel level = PdfCompressionLevel.medium,
+  }) async {
+    final pages = await renderAllPages(file);
+    final (quality, maxDimension) = switch (level) {
+      PdfCompressionLevel.low => (35, 900),
+      PdfCompressionLevel.medium => (55, 1280),
+      PdfCompressionLevel.high => (75, 1800),
+    };
+
+    final compressed = <RenderedPdfPage>[];
+    for (final page in pages) {
+      final decoded = img.decodeImage(page.bytes);
+      if (decoded == null) {
+        compressed.add(page);
+        continue;
+      }
+      final resized = decoded.width > maxDimension
+          ? img.copyResize(decoded, width: maxDimension)
+          : decoded;
+      compressed.add(
+        RenderedPdfPage(
+          bytes: Uint8List.fromList(img.encodeJpg(resized, quality: quality)),
+          width: page.width,
+          height: page.height,
+        ),
+      );
+    }
+    return exportMultiPagePdf(
+      pages: compressed,
+      items: const [],
+      sourceName: sourceName,
+    );
+  }
+
   static pw.Widget _buildPdfItem(
     EditorItem item,
     double pageWidth,
@@ -148,6 +226,11 @@ class PdfService {
         child = item.bytes == null
             ? pw.SizedBox()
             : pw.Image(pw.MemoryImage(item.bytes!), fit: pw.BoxFit.contain);
+        break;
+      case EditorItemType.rect:
+        child = pw.Container(
+          color: pdf_core.PdfColor.fromInt(item.colorValue),
+        );
         break;
       case EditorItemType.drawing:
         child = pw.CustomPaint(

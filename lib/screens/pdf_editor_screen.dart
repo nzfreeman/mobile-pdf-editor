@@ -10,6 +10,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/editor_item.dart';
 import '../services/android_file_service.dart';
+import '../services/ocr_service.dart';
 import '../services/pdf_service.dart';
 
 class PdfEditorScreen extends StatefulWidget {
@@ -56,6 +57,10 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   bool _showMoreToolsIndicator = true;
   bool _resizingItem = false;
   bool _rotatingItem = false;
+  bool _recognizing = false;
+  final Map<String, GlobalKey> _itemContentKeys = {};
+  double? _rotateStartAngle;
+  double _rotateStartRotation = 0;
   double _zoomScale = 1;
   List<DrawingPoint> _activeStroke = [];
 
@@ -226,6 +231,109 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     setState(() => item.text = text);
   }
 
+  Future<void> _recognizeExistingText() async {
+    if (_pages.isEmpty) return;
+    setState(() => _recognizing = true);
+    List<OcrTextBlock> blocks;
+    try {
+      blocks = await OcrService.recognizeText(_pages[_pageIndex].bytes);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('텍스트 인식 실패: $error')));
+      }
+      return;
+    } finally {
+      if (mounted) setState(() => _recognizing = false);
+    }
+    if (!mounted) return;
+    if (blocks.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('이 페이지에서 텍스트를 찾지 못했습니다.')));
+      return;
+    }
+
+    final selected = await showModalBottomSheet<OcrTextBlock>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        builder: (_, scrollController) => SafeArea(
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text(
+                  '수정할 텍스트를 선택하세요',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  itemCount: blocks.length,
+                  itemBuilder: (_, index) => ListTile(
+                    title: Text(blocks[index].text),
+                    onTap: () => Navigator.pop(sheetContext, blocks[index]),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+
+    final newText = await _textDialog(
+      initialText: selected.text,
+      title: '텍스트 수정',
+    );
+    if (newText == null || newText.isEmpty) return;
+
+    const padding = 0.006;
+    final maskX = (selected.x - padding).clamp(0.0, 1.0);
+    final maskY = (selected.y - padding).clamp(0.0, 1.0);
+    final maskWidth = math.min(selected.width + padding * 2, 1.0 - maskX);
+    final maskHeight = math.min(selected.height + padding * 2, 1.0 - maskY);
+
+    _commit();
+    setState(() {
+      final mask = EditorItem(
+        id: _uuid.v4(),
+        type: EditorItemType.rect,
+        pageIndex: _pageIndex,
+        x: maskX,
+        y: maskY,
+        width: maskWidth,
+        height: maskHeight,
+        colorValue: 0xFFFFFFFF,
+      );
+      final page = _pages[_pageIndex];
+      final replacement = EditorItem(
+        id: _uuid.v4(),
+        type: EditorItemType.text,
+        pageIndex: _pageIndex,
+        x: selected.x,
+        y: selected.y,
+        width: selected.width,
+        height: selected.height,
+        text: newText,
+        fontSize: (selected.height * page.height * 0.72)
+            .clamp(8.0, 96.0)
+            .toDouble(),
+      );
+      _items
+        ..add(mask)
+        ..add(replacement);
+      _selectedId = replacement.id;
+      _drawingMode = false;
+    });
+  }
+
   void _addCheck() {
     _commit();
     setState(() {
@@ -347,8 +455,23 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     _commit();
     setState(() {
       _items.removeWhere((item) => item.id == _selectedId);
+      _itemContentKeys.remove(_selectedId);
       _selectedId = null;
     });
+  }
+
+  GlobalKey _contentKeyFor(String itemId) =>
+      _itemContentKeys.putIfAbsent(itemId, () => GlobalKey());
+
+  /// Global (screen-space) center of the item's rotation pivot, unaffected
+  /// by the item's own [EditorItem.rotation] since [Transform.rotate]
+  /// rotates about its own center by default.
+  Offset? _itemGlobalCenter(EditorItem item) {
+    final box =
+        _contentKeyFor(item.id).currentContext?.findRenderObject()
+            as RenderBox?;
+    if (box == null || !box.attached) return null;
+    return box.localToGlobal(box.size.center(Offset.zero));
   }
 
   void _copySelected() {
@@ -716,6 +839,11 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
             _insertTool(Icons.gesture, '서명', _addSignature),
             _insertTool(Icons.calendar_today_outlined, '날짜', _addDate),
             _insertTool(
+              Icons.find_replace,
+              '텍스트 편집',
+              _recognizing ? () {} : _recognizeExistingText,
+            ),
+            _insertTool(
               _drawingMode ? Icons.edit_off : Icons.draw,
               _drawingMode ? '필기 종료' : '자유 필기',
               () {
@@ -774,7 +902,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         selected == null ||
         selected.type == EditorItemType.text ||
         selected.type == EditorItemType.check ||
-        selected.type == EditorItemType.drawing;
+        selected.type == EditorItemType.drawing ||
+        selected.type == EditorItemType.rect;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _updateToolbarIndicator();
@@ -1164,7 +1293,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                               left: 8,
                               child: Chip(label: Text('필기 모드')),
                             ),
-                          if (_exporting)
+                          if (_exporting || _recognizing)
                             const Positioned.fill(
                               child: ColoredBox(
                                 color: Color(0x33000000),
@@ -1243,6 +1372,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
           item.strokeWidth,
         ),
       );
+    } else if (item.type == EditorItemType.rect) {
+      content = ColoredBox(color: Color(item.colorValue));
     } else {
       content = item.bytes == null
           ? const SizedBox()
@@ -1257,6 +1388,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       child: Transform.rotate(
         angle: item.rotation,
         child: Stack(
+          key: _contentKeyFor(item.id),
           clipBehavior: Clip.none,
           children: [
             Positioned.fill(
@@ -1318,15 +1450,35 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 child: Center(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onPanStart: (_) {
+                    onPanStart: (details) {
                       _commit();
+                      final center = _itemGlobalCenter(item);
+                      if (center != null) {
+                        final vector = details.globalPosition - center;
+                        _rotateStartAngle = math.atan2(vector.dy, vector.dx);
+                        _rotateStartRotation = item.rotation;
+                      }
                       setState(() => _rotatingItem = true);
                     },
                     onPanUpdate: (details) {
-                      setState(() => item.rotation += details.delta.dx * 0.018);
+                      final startAngle = _rotateStartAngle;
+                      final center = _itemGlobalCenter(item);
+                      if (startAngle == null || center == null) return;
+                      final vector = details.globalPosition - center;
+                      final currentAngle = math.atan2(vector.dy, vector.dx);
+                      setState(() {
+                        item.rotation =
+                            _rotateStartRotation + (currentAngle - startAngle);
+                      });
                     },
-                    onPanEnd: (_) => setState(() => _rotatingItem = false),
-                    onPanCancel: () => setState(() => _rotatingItem = false),
+                    onPanEnd: (_) {
+                      _rotateStartAngle = null;
+                      setState(() => _rotatingItem = false);
+                    },
+                    onPanCancel: () {
+                      _rotateStartAngle = null;
+                      setState(() => _rotatingItem = false);
+                    },
                     child: _handle(
                       icon: Icons.rotate_right,
                       tooltip: '좌우로 드래그하여 회전',

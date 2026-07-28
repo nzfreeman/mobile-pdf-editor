@@ -21,6 +21,22 @@ class AndroidFileService {
     return SelectedPdfFile(path: path, name: name);
   }
 
+  static Future<List<SelectedPdfFile>> pickMultiplePdfs() async {
+    final result = await _channel.invokeListMethod<Map<Object?, Object?>>(
+      'pickMultiplePdfs',
+    );
+    if (result == null) return [];
+    return result
+        .map((entry) {
+          final path = entry['path'] as String?;
+          final name = entry['name'] as String?;
+          if (path == null || name == null) return null;
+          return SelectedPdfFile(path: path, name: name);
+        })
+        .whereType<SelectedPdfFile>()
+        .toList();
+  }
+
   static Future<bool> savePdf({
     required String sourcePath,
     required String fileName,

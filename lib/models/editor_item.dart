@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
-enum EditorItemType { text, check, signature, image, stamp, drawing }
+enum EditorItemType { text, check, signature, image, stamp, drawing, rect }
 
 class DrawingPoint {
   const DrawingPoint(this.dx, this.dy);

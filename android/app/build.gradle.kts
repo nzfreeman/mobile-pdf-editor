@@ -29,8 +29,20 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
+}
+
+dependencies {
+    // google_mlkit_text_recognition only declares script-specific recognizer
+    // packages as compileOnly; the app must add the ones it actually uses
+    // (OcrService uses TextRecognitionScript.korean) or they're missing at
+    // runtime.
+    implementation("com.google.mlkit:text-recognition-korean:16.0.1")
 }
 
 kotlin {
