@@ -11,6 +11,8 @@ import 'package:uuid/uuid.dart';
 import '../models/editor_item.dart';
 import '../services/android_file_service.dart';
 import '../services/ocr_service.dart';
+import '../services/pdf_native/pdf_content_stream.dart';
+import '../services/pdf_native/pdf_native_text_service.dart';
 import '../services/pdf_service.dart';
 
 class PdfEditorScreen extends StatefulWidget {
@@ -58,6 +60,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   bool _resizingItem = false;
   bool _rotatingItem = false;
   bool _recognizing = false;
+  late File _currentFile = widget.pdfFile;
+  bool _hasNativeTextEdits = false;
   final Map<String, GlobalKey> _itemContentKeys = {};
   double? _rotateStartAngle;
   double _rotateStartRotation = 0;
@@ -90,7 +94,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
 
   Future<void> _load() async {
     try {
-      final pages = await PdfService.renderAllPages(widget.pdfFile);
+      final pages = await PdfService.renderAllPages(_currentFile);
       if (mounted) setState(() => _pages = pages);
     } catch (error) {
       if (mounted) {
@@ -229,6 +233,122 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     if (text == null || text == item.text) return;
     _commit();
     setState(() => item.text = text);
+  }
+
+  /// Entry point for the "edit existing text" toolbar action: tries to
+  /// read and edit the PDF's real text objects (preserving the original
+  /// font) first, and only falls back to the OCR-overlay approximation
+  /// when that isn't possible — the page has no extractable text (a scan
+  /// / image-only page), the document uses features this reader doesn't
+  /// support (encryption, exotic filters), or the specific run uses a
+  /// CID/Type0 composite font (the common case for Korean body text) that
+  /// this reader can only read, not safely re-encode.
+  Future<void> _editExistingText() async {
+    if (_pages.isEmpty) return;
+    setState(() => _recognizing = true);
+    List<PdfNativePage> nativePages;
+    try {
+      nativePages = await PdfNativeTextService.extractRuns(_currentFile);
+    } catch (_) {
+      nativePages = const [];
+    } finally {
+      if (mounted) setState(() => _recognizing = false);
+    }
+    if (!mounted) return;
+
+    final runsOnPage = nativePages
+        .where((page) => page.pageIndex == _pageIndex)
+        .expand((page) => page.runs)
+        .where((run) => run.text.trim().isNotEmpty)
+        .toList();
+
+    if (runsOnPage.isEmpty) {
+      await _recognizeExistingText();
+      return;
+    }
+
+    final selected = await showModalBottomSheet<PdfTextRun>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        builder: (_, scrollController) => SafeArea(
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text(
+                  '수정할 텍스트를 선택하세요 (원본 폰트 유지)',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  controller: scrollController,
+                  itemCount: runsOnPage.length,
+                  itemBuilder: (_, index) {
+                    final run = runsOnPage[index];
+                    return ListTile(
+                      title: Text(run.text),
+                      subtitle: run.isEditable
+                          ? null
+                          : const Text(
+                              '복합 폰트라 원본 유지 수정이 불가능합니다 (OCR 방식 사용)',
+                              style: TextStyle(fontSize: 11),
+                            ),
+                      onTap: () => Navigator.pop(sheetContext, run),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+
+    if (!selected.isEditable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('복합 폰트는 원본 유지 수정이 불가능해 OCR 방식으로 전환합니다.'),
+        ),
+      );
+      await _recognizeExistingText();
+      return;
+    }
+
+    final newText = await _textDialog(
+      initialText: selected.text,
+      title: '텍스트 수정',
+    );
+    if (newText == null || newText.isEmpty || newText == selected.text) return;
+
+    setState(() => _recognizing = true);
+    try {
+      final edited = await PdfNativeTextService.replaceRunText(
+        file: _currentFile,
+        run: selected,
+        newText: newText,
+      );
+      _currentFile = edited;
+      _hasNativeTextEdits = true;
+      await _load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('원본 폰트를 유지한 채 텍스트를 수정했습니다.')),
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('텍스트 수정 실패: $error')));
+      }
+    } finally {
+      if (mounted) setState(() => _recognizing = false);
+    }
   }
 
   Future<void> _recognizeExistingText() async {
@@ -621,6 +741,15 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
 
   Future<File?> _exportFile() async {
     if (_pages.isEmpty) return null;
+    // If the only change this session was one or more native text edits
+    // (no stamps/signatures/drawing overlays added), save the natively
+    // edited file directly — it's still a real PDF with the original
+    // fonts/structure intact. Routing it through the raster rebuild below
+    // would flatten it to an image like everything else and throw that
+    // fidelity away for no reason.
+    if (_hasNativeTextEdits && _items.isEmpty) {
+      return _currentFile;
+    }
     setState(() => _exporting = true);
     try {
       return await PdfService.exportMultiPagePdf(
@@ -841,7 +970,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
             _insertTool(
               Icons.find_replace,
               '텍스트 편집',
-              _recognizing ? () {} : _recognizeExistingText,
+              _recognizing ? () {} : _editExistingText,
             ),
             _insertTool(
               _drawingMode ? Icons.edit_off : Icons.draw,
