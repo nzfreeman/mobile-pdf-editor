@@ -12,6 +12,7 @@ import '../models/editor_item.dart';
 import '../services/android_file_service.dart';
 import '../services/ocr_service.dart';
 import '../services/pdf_native/pdf_content_stream.dart';
+import '../services/pdf_native/pdf_native_edit_builder.dart';
 import '../services/pdf_native/pdf_native_text_service.dart';
 import '../services/pdf_service.dart';
 
@@ -240,9 +241,11 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   /// font) first, and only falls back to the OCR-overlay approximation
   /// when that isn't possible — the page has no extractable text (a scan
   /// / image-only page), the document uses features this reader doesn't
-  /// support (encryption, exotic filters), or the specific run uses a
-  /// CID/Type0 composite font (the common case for Korean body text) that
-  /// this reader can only read, not safely re-encode.
+  /// support (encryption, exotic filters), or the replacement text
+  /// contains a character that was never embedded anywhere in this exact
+  /// font (CID/Type0 fonts, common for Korean body text, can only reuse
+  /// characters that already appear somewhere in the document under the
+  /// same font — see PdfFontInfo.encode).
   Future<void> _editExistingText() async {
     if (_pages.isEmpty) return;
     setState(() => _recognizing = true);
@@ -289,14 +292,15 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                   itemCount: runsOnPage.length,
                   itemBuilder: (_, index) {
                     final run = runsOnPage[index];
+                    final unreadable = run.text.contains('�');
                     return ListTile(
                       title: Text(run.text),
-                      subtitle: run.isEditable
-                          ? null
-                          : const Text(
-                              '복합 폰트라 원본 유지 수정이 불가능합니다 (OCR 방식 사용)',
+                      subtitle: unreadable
+                          ? const Text(
+                              '이 폰트는 읽을 수 없어 OCR 방식으로 전환합니다',
                               style: TextStyle(fontSize: 11),
-                            ),
+                            )
+                          : null,
                       onTap: () => Navigator.pop(sheetContext, run),
                     );
                   },
@@ -308,16 +312,6 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       ),
     );
     if (selected == null || !mounted) return;
-
-    if (!selected.isEditable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('복합 폰트는 원본 유지 수정이 불가능해 OCR 방식으로 전환합니다.'),
-        ),
-      );
-      await _recognizeExistingText();
-      return;
-    }
 
     final newText = await _textDialog(
       initialText: selected.text,
@@ -340,6 +334,20 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
           const SnackBar(content: Text('원본 폰트를 유지한 채 텍스트를 수정했습니다.')),
         );
       }
+    } on PdfRunNotEditableException {
+      // This font can't represent one or more characters in the
+      // replacement text (e.g. a brand-new character never embedded
+      // anywhere else in the document) — fall back to the OCR overlay,
+      // which can draw arbitrary text using the app's own bundled font.
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('이 글자는 원본 폰트에 없어 OCR 방식으로 전환합니다.'),
+          ),
+        );
+      }
+      await _recognizeExistingText();
+      return;
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(

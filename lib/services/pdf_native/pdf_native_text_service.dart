@@ -20,14 +20,17 @@ class PdfNativePage {
 /// Scope, by design (see individual file docs for details): this only
 /// understands FlateDecode-compressed, unencrypted PDFs with classic or
 /// xref-stream cross-reference tables. Text using simple (WinAnsi-ish
-/// single-byte) fonts can be both read and edited in place, preserving
+/// single-byte) fonts can always be read and edited in place, preserving
 /// the original font resource. Text using Type0/CID composite fonts
 /// (which is how most Korean/CJK text is encoded) can be *read* whenever
-/// the font has an embedded ToUnicode CMap, but cannot be *edited*
-/// through this path — re-encoding new characters into a CID font
-/// requires parsing the embedded font program's own cmap table, which
-/// this implementation does not do. Callers should fall back to the
-/// existing OCR-overlay edit flow for those runs.
+/// the font has an embedded ToUnicode CMap, and can be *edited* too, but
+/// only by reusing characters that already appear somewhere else in the
+/// document under that same font — inverting ToUnicode gives Unicode ->
+/// CID for whatever was already embedded, but adding a genuinely new
+/// character would require parsing the embedded font program's own cmap
+/// table, which this implementation does not do. Callers should fall
+/// back to the existing OCR-overlay edit flow when [PdfFontInfo.encode]
+/// returns null for the desired replacement text.
 class PdfNativeTextService {
   PdfNativeTextService._();
 

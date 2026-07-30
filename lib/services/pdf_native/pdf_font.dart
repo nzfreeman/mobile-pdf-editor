@@ -23,10 +23,14 @@ class PdfFontInfo {
   final String Function(Uint8List bytes) decode;
 
   /// Encodes [text] back into bytes valid for this exact font resource.
-  /// Returns null when this can't be done losslessly (always the case for
-  /// CID/Type0 fonts in this implementation — see class docs) — callers
-  /// must then fall back to a different edit strategy (e.g. the OCR
-  /// overlay path) rather than write corrupt operator bytes.
+  /// Returns null when this can't be done losslessly. For CID/Type0
+  /// fonts, this only succeeds when every character in [text] already
+  /// appears somewhere in this exact font's ToUnicode map (i.e. was
+  /// already embedded for some other run in the document) — this reader
+  /// doesn't parse the embedded font program itself, so it can reuse an
+  /// existing glyph but can't add a genuinely new one. Callers must
+  /// handle null by falling back to a different edit strategy (e.g. the
+  /// OCR overlay path) rather than write corrupt operator bytes.
   final Uint8List? Function(String text) encode;
 
   /// Approximate glyph width (in the font's own unitsPerEm, typically
@@ -106,12 +110,28 @@ PdfFontInfo _resolveType0Font(PdfDocument doc, PdfDictionaryObj fontDict) {
     toUnicode = parseToUnicodeCMap(String.fromCharCodes(decoded));
   }
 
+  // Inverting the font's own ToUnicode map gives Unicode -> CID for every
+  // glyph already present in this (typically subsetted) font — no need to
+  // parse the embedded TrueType/CFF program's own cmap table. This means
+  // replacement text can reuse an *existing* CID for any character that
+  // already appears somewhere else in the document under this exact font
+  // resource (extremely common for typo fixes, which reuse the same
+  // vocabulary). New characters that were never embedded at all still
+  // can't be represented — that part is a genuine PDF-format limitation,
+  // not something any parser can work around without re-embedding a font.
+  Map<String, int>? reverseToUnicode;
+  if (toUnicode != null) {
+    reverseToUnicode = {};
+    for (final entry in toUnicode.entries) {
+      reverseToUnicode.putIfAbsent(entry.value, () => entry.key);
+    }
+  }
+
   String decode(Uint8List bytes) {
     if (toUnicode == null) {
-      // No ToUnicode CMap: we can't reliably map CIDs to characters
-      // (that requires parsing the embedded font's own cmap table, out
-      // of scope here). Surface a placeholder so callers can detect this
-      // run is unreadable and fall back to the OCR overlay path.
+      // No ToUnicode CMap at all: we can't reliably map CIDs to
+      // characters. Surface a placeholder so callers can detect this run
+      // is unreadable and fall back to the OCR overlay path.
       return '�' * (bytes.length ~/ 2);
     }
     final buffer = StringBuffer();
@@ -122,16 +142,32 @@ PdfFontInfo _resolveType0Font(PdfDocument doc, PdfDictionaryObj fontDict) {
     return buffer.toString();
   }
 
+  Uint8List? encode(String text) {
+    final reverse = reverseToUnicode;
+    if (reverse == null) return null;
+    final cids = <int>[];
+    for (final rune in text.runes) {
+      final cid = reverse[String.fromCharCode(rune)];
+      if (cid == null) return null;
+      cids.add(cid);
+    }
+    final bytes = Uint8List(cids.length * 2);
+    for (var i = 0; i < cids.length; i++) {
+      bytes[i * 2] = (cids[i] >> 8) & 0xFF;
+      bytes[i * 2 + 1] = cids[i] & 0xFF;
+    }
+    return bytes;
+  }
+
   return PdfFontInfo(
     isCid: true,
     decode: decode,
-    // Re-encoding arbitrary new text into this font's CID space requires
-    // the embedded font's Unicode->glyph cmap, which this reader doesn't
-    // parse — always unsupported, by design (see PdfFontInfo.encode docs).
-    encode: (_) => null,
+    encode: encode,
     widthOf: (char) {
       if (char.isEmpty) return defaultWidth;
-      return widthMap[char.codeUnitAt(0)] ?? defaultWidth;
+      final cid = reverseToUnicode?[char];
+      if (cid == null) return defaultWidth;
+      return widthMap[cid] ?? defaultWidth;
     },
     unitsPerEm: 1000,
   );

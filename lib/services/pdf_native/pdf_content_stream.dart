@@ -101,10 +101,14 @@ class PdfTextRun {
   /// whatever transform was active at that point in the stream.
   final Mat2D ctm;
 
-  /// Whether this run's text/font is understood well enough to safely
-  /// rewrite (simple fonts we can re-encode). CID/Type0 runs are always
-  /// readable-only here — see [PdfFontInfo.encode].
-  bool get isEditable => !font.isCid && font.encode(text) != null;
+  /// Whether this run's *own* text can round-trip through
+  /// [PdfFontInfo.encode] — for CID fonts this is really "does this run
+  /// have a ToUnicode map at all" (trivially true when it decoded to
+  /// real text rather than placeholders), not a guarantee that arbitrary
+  /// replacement text will also encode. Callers must still try encoding
+  /// the actual replacement text and handle [PdfRunNotEditableException]
+  /// — see pdf_native_edit_builder.dart.
+  bool get isEditable => font.encode(text) != null;
 }
 
 class _GraphicsState {
