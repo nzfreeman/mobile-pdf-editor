@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:image_cropper/image_cropper.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 
@@ -13,6 +12,9 @@ import 'merge_pdf_screen.dart';
 import 'ocr_screen.dart';
 import 'organize_pdf_screen.dart';
 import 'pdf_editor_screen.dart';
+import 'form_screen.dart';
+import 'perspective_crop_screen.dart';
+import 'watermark_screen.dart';
 import 'split_pdf_screen.dart';
 
 class ToolsScreen extends StatefulWidget {
@@ -67,15 +69,15 @@ class _ToolsScreenState extends State<ToolsScreen> {
         imageQuality: 95,
       );
       if (captured == null) return;
-      final cropped = await ImageCropper().cropImage(
-        sourcePath: captured.path,
-        compressQuality: 94,
-        uiSettings: [
-          AndroidUiSettings(toolbarTitle: '문서 자르기', lockAspectRatio: false),
-        ],
+      if (!mounted) return;
+      final rectified = await Navigator.push<File>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PerspectiveCropScreen(imageFile: File(captured.path)),
+        ),
       );
-      if (cropped == null) return;
-      final pdf = await ImagePdfService.createPdf([File(cropped.path)]);
+      if (rectified == null) return;
+      final pdf = await ImagePdfService.createPdf([rectified]);
       if (!mounted) return;
       await Navigator.push(
         context,
@@ -152,6 +154,34 @@ class _ToolsScreenState extends State<ToolsScreen> {
     );
   }
 
+  Future<void> _watermark() async {
+    final selected = await _pickPdf();
+    if (selected == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => WatermarkScreen(
+          file: File(selected.path),
+          fileName: selected.name,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _forms() async {
+    final selected = await _pickPdf();
+    if (selected == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FormScreen(
+          file: File(selected.path),
+          fileName: selected.name,
+        ),
+      ),
+    );
+  }
+
   Future<void> _ocr() async {
     final selected = await _pickPdf();
     if (selected == null || !mounted) return;
@@ -209,6 +239,8 @@ class _ToolsScreenState extends State<ToolsScreen> {
       _ToolData('PDF 병합', Icons.call_merge, _mergePdfs),
       _ToolData('PDF 분할', Icons.call_split, _splitPdf),
       _ToolData('PDF 압축', Icons.compress, _compressPdf),
+      _ToolData('워터마크', Icons.water_drop_outlined, _watermark),
+      _ToolData('양식 작성/채우기', Icons.dynamic_form_outlined, _forms),
       _ToolData('PDF 잠금', Icons.lock_outline, () => _comingSoon('PDF 잠금')),
       _ToolData('잠금 해제', Icons.lock_open, () => _comingSoon('잠금 해제')),
       _ToolData('OCR', Icons.text_snippet_outlined, _ocr),

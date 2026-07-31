@@ -196,6 +196,158 @@ class PdfService {
     );
   }
 
+  /// Stamps a text or image watermark onto every page of [file]. Exactly
+  /// one of [text]/[imageBytes] should be given.
+  static Future<File> addWatermark({
+    required File file,
+    required String sourceName,
+    String? text,
+    Uint8List? imageBytes,
+    double opacity = 0.3,
+    double rotationDegrees = -45,
+    bool tile = true,
+    double fontSize = 40,
+    int colorValue = 0xFF808080,
+  }) async {
+    final pages = await renderAllPages(file);
+    return addWatermarkToPages(
+      pages: pages,
+      sourceName: sourceName,
+      text: text,
+      imageBytes: imageBytes,
+      opacity: opacity,
+      rotationDegrees: rotationDegrees,
+      tile: tile,
+      fontSize: fontSize,
+      colorValue: colorValue,
+    );
+  }
+
+  /// Page-list entry point for [addWatermark], split out so the
+  /// composition logic can be exercised without needing a real PDF to
+  /// render (pdfium) — only [exportMultiPagePdf]'s pure-Dart write path
+  /// is under test there.
+  static Future<File> addWatermarkToPages({
+    required List<RenderedPdfPage> pages,
+    required String sourceName,
+    String? text,
+    Uint8List? imageBytes,
+    double opacity = 0.3,
+    double rotationDegrees = -45,
+    bool tile = true,
+    double fontSize = 40,
+    int colorValue = 0xFF808080,
+  }) async {
+    assert(
+      (text != null) ^ (imageBytes != null),
+      'Provide exactly one of text or imageBytes',
+    );
+    final document = pw.Document(compress: true);
+    final imageProvider = imageBytes == null ? null : pw.MemoryImage(imageBytes);
+
+    for (final page in pages) {
+      final pageFormat = pdf_core.PdfPageFormat(page.width, page.height);
+      final background = pw.MemoryImage(page.bytes);
+      final watermarkChild = text != null
+          ? pw.Text(
+              text,
+              style: pw.TextStyle(
+                fontSize: fontSize,
+                color: pdf_core.PdfColor.fromInt(colorValue),
+              ),
+            )
+          : pw.Image(imageProvider!, width: fontSize * 2.4, height: fontSize * 2.4);
+
+      document.addPage(
+        pw.Page(
+          pageFormat: pageFormat,
+          margin: pw.EdgeInsets.zero,
+          build: (_) => pw.Stack(
+            children: [
+              pw.Positioned.fill(
+                child: pw.Image(background, fit: pw.BoxFit.fill),
+              ),
+              pw.Positioned.fill(
+                child: pw.Opacity(
+                  opacity: opacity,
+                  child: tile
+                      ? _tiledWatermark(
+                          child: watermarkChild,
+                          pageWidth: page.width,
+                          pageHeight: page.height,
+                          rotationDegrees: rotationDegrees,
+                          isText: text != null,
+                          fontSize: fontSize,
+                        )
+                      : pw.Center(
+                          child: pw.Transform.rotate(
+                            angle: rotationDegrees * math.pi / 180,
+                            child: watermarkChild,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final directory = await getApplicationDocumentsDirectory();
+    final safeName = sourceName
+        .replaceAll(RegExp(r'\.[Pp][Dd][Ff]$'), '')
+        .replaceAll(RegExp(r'[^a-zA-Z0-9가-힣_-]'), '_');
+    final output = File(
+      '${directory.path}/${safeName}_watermarked_${DateTime.now().millisecondsSinceEpoch}.pdf',
+    );
+    await output.writeAsBytes(await document.save(), flush: true);
+    return output;
+  }
+
+  /// Repeats [child] in a grid large enough to cover the page even after
+  /// rotation: the grid is built inside a square whose side is the
+  /// page's own diagonal, centered on the page, so a square that size
+  /// always fully covers the page regardless of rotation angle.
+  static pw.Widget _tiledWatermark({
+    required pw.Widget child,
+    required double pageWidth,
+    required double pageHeight,
+    required double rotationDegrees,
+    required bool isText,
+    required double fontSize,
+  }) {
+    final diagonal = math.sqrt(
+      pageWidth * pageWidth + pageHeight * pageHeight,
+    );
+    final spacingX = isText ? fontSize * 6 : fontSize * 3.2;
+    final spacingY = isText ? fontSize * 4 : fontSize * 3.2;
+    final steps = (diagonal / math.min(spacingX, spacingY)).ceil() + 2;
+
+    final tiles = <pw.Widget>[];
+    for (var row = -steps ~/ 2; row <= steps ~/ 2; row++) {
+      for (var col = -steps ~/ 2; col <= steps ~/ 2; col++) {
+        tiles.add(
+          pw.Positioned(
+            left: diagonal / 2 + col * spacingX,
+            top: diagonal / 2 + row * spacingY,
+            child: child,
+          ),
+        );
+      }
+    }
+
+    return pw.Center(
+      child: pw.SizedBox(
+        width: diagonal,
+        height: diagonal,
+        child: pw.Transform.rotate(
+          angle: rotationDegrees * math.pi / 180,
+          child: pw.Stack(children: tiles),
+        ),
+      ),
+    );
+  }
+
   static pw.Widget _buildPdfItem(
     EditorItem item,
     double pageWidth,
