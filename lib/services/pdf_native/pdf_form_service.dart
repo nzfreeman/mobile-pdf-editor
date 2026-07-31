@@ -90,6 +90,16 @@ class PdfFormService {
     return _writeAndSave(doc, bytes, [write]);
   }
 
+  static Future<File> selectRadioOption({
+    required File file,
+    required PdfFormField selected,
+  }) async {
+    final bytes = await file.readAsBytes();
+    final doc = PdfDocument.parse(bytes);
+    final writes = buildRadioSelectionWrites(doc: doc, selected: selected);
+    return _writeAndSave(doc, bytes, writes);
+  }
+
   static Future<File> addTextField({
     required File file,
     required int pageIndex,

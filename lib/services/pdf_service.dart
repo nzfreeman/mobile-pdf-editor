@@ -121,41 +121,6 @@ class PdfService {
     return output;
   }
 
-  /// Renders and concatenates every page of [files], in order, into a single
-  /// PDF.
-  static Future<File> mergePdfFiles({
-    required List<File> files,
-    required String sourceName,
-  }) async {
-    final pages = <RenderedPdfPage>[];
-    for (final file in files) {
-      pages.addAll(await renderAllPages(file));
-    }
-    return exportMultiPagePdf(pages: pages, items: const [], sourceName: sourceName);
-  }
-
-  /// Splits [file] into one output PDF per group of (0-based) page indices
-  /// in [pageGroups], preserving the order given.
-  static Future<List<File>> splitPdf({
-    required File file,
-    required List<List<int>> pageGroups,
-    required String sourceName,
-  }) async {
-    final pages = await renderAllPages(file);
-    final outputs = <File>[];
-    for (var i = 0; i < pageGroups.length; i++) {
-      final subset = pageGroups[i].map((index) => pages[index]).toList();
-      outputs.add(
-        await exportMultiPagePdf(
-          pages: subset,
-          items: const [],
-          sourceName: '${sourceName.replaceAll(RegExp(r'\.[Pp][Dd][Ff]$'), '')}_part${i + 1}',
-        ),
-      );
-    }
-    return outputs;
-  }
-
   /// Re-encodes every page as a quality/size-reduced JPEG and rebuilds the
   /// PDF, which shrinks output size considerably versus the lossless PNG
   /// pages produced by [renderAllPages].

@@ -7,18 +7,20 @@ import 'pdf_font_embedder.dart';
 import 'pdf_incremental_writer.dart';
 import 'pdf_objects.dart';
 
-enum PdfFormFieldType { text, checkbox }
+enum PdfFormFieldType { text, checkbox, radio, choice }
 
 /// An AcroForm field, positioned in the same normalized (0-1, top-left
 /// origin, y-down) coordinate system the rest of the app's editor
 /// overlays use — converted from the PDF's own y-up `/Rect` + page
 /// `/MediaBox` at parse time.
 ///
-/// Scope, by design: only flat (non-hierarchical, no `/Kids`) text and
-/// checkbox fields are supported — the overwhelming majority of
-/// real-world simple forms merge the field and its single widget
-/// annotation into one object, which is what this reads. Radio buttons,
-/// choice/list fields, and multi-widget fields are not handled.
+/// Scope, by design: text, checkbox, choice (combo/list) fields, and
+/// radio button groups are all supported — covering the field types
+/// that appear in the overwhelming majority of real-world forms.
+/// Hierarchical *non-radio* field trees beyond one level (a field whose
+/// kids are themselves non-terminal fields, rather than either radio
+/// widgets or a single terminal field) are not walked — vanishingly rare
+/// outside radio groups in practice.
 class PdfFormField {
   const PdfFormField({
     required this.ref,
@@ -32,6 +34,9 @@ class PdfFormField {
     required this.rectPoints,
     required this.value,
     required this.checked,
+    this.options = const [],
+    this.radioGroupRef,
+    this.radioSiblingRefs = const [],
   });
 
   final PdfRef ref;
@@ -47,8 +52,21 @@ class PdfFormField {
   /// regenerated appearance stream's own `/BBox`).
   final (double width, double height) rectPoints;
 
+  /// Current value (text/choice), or this specific widget's on-state
+  /// export name (radio/checkbox — for radio, compare against the
+  /// group's `/V` to know whether *this* option is the selected one).
   final String value;
   final bool checked;
+
+  /// Choice fields only: available option display strings.
+  final List<String> options;
+
+  /// Radio fields only: the parent (group) field object, which holds
+  /// `/V`, and every sibling widget in the group (including this one) —
+  /// selecting one option requires updating the group's `/V` plus every
+  /// sibling's own `/AS`.
+  final PdfRef? radioGroupRef;
+  final List<PdfRef> radioSiblingRefs;
 }
 
 List<PdfFormField> extractFormFields(PdfDocument doc) {
@@ -65,13 +83,58 @@ List<PdfFormField> extractFormFields(PdfDocument doc) {
     if (item is! PdfRef) continue;
     final dict = doc.resolve(item);
     if (dict is! PdfDictionaryObj) continue;
-    final field = _parseField(doc, item, dict, pages);
-    if (field != null) result.add(field);
+    _walkField(doc, item, dict, pages, result);
   }
   return result;
 }
 
-PdfFormField? _parseField(
+void _walkField(
+  PdfDocument doc,
+  PdfRef ref,
+  PdfDictionaryObj dict,
+  List<PdfDictionaryObj> pages,
+  List<PdfFormField> out,
+) {
+  final ft = (doc.resolve(dict['FT']) as PdfName?)?.value;
+  final ff = (doc.resolve(dict['Ff']) as PdfNumber?)?.intValue ?? 0;
+  const radioFlag = 1 << 15;
+  final isRadioGroup = ft == 'Btn' && (ff & radioFlag) != 0;
+  final kidsObj = doc.resolve(dict['Kids']);
+  final hasOwnRect = dict['Rect'] != null;
+
+  if (!hasOwnRect && kidsObj is PdfArrayObj) {
+    if (isRadioGroup) {
+      _parseRadioGroup(doc, ref, dict, kidsObj, pages, out);
+    } else {
+      // Non-terminal, non-radio node: descend into each kid field.
+      for (final kidItem in kidsObj.items) {
+        if (kidItem is! PdfRef) continue;
+        final kidDict = doc.resolve(kidItem);
+        if (kidDict is! PdfDictionaryObj) continue;
+        _walkField(doc, kidItem, kidDict, pages, out);
+      }
+    }
+    return;
+  }
+
+  if (ft == 'Ch') {
+    final field = _parseChoiceField(doc, ref, dict, pages);
+    if (field != null) out.add(field);
+    return;
+  }
+  final field = _parseField(doc, ref, dict, pages);
+  if (field != null) out.add(field);
+}
+
+({
+  int pageIndex,
+  double normX,
+  double normY,
+  double normWidth,
+  double normHeight,
+  (double, double) rectPoints,
+})?
+_resolveWidgetPosition(
   PdfDocument doc,
   PdfRef ref,
   PdfDictionaryObj dict,
@@ -112,13 +175,40 @@ PdfFormField? _parseField(
   final pageHeight = mediaBox[3] - mediaBox[1];
   if (pageWidth <= 0 || pageHeight <= 0) return null;
 
+  final llx = rect[0], lly = rect[1], urx = rect[2], ury = rect[3];
+  return (
+    pageIndex: pageIndex,
+    normX: (llx - mediaBox[0]) / pageWidth,
+    normY: (mediaBox[3] - ury) / pageHeight,
+    normWidth: (urx - llx) / pageWidth,
+    normHeight: (ury - lly) / pageHeight,
+    rectPoints: (urx - llx, ury - lly),
+  );
+}
+
+String _fieldName(PdfDocument doc, PdfDictionaryObj dict) {
+  final ownT = doc.resolve(dict['T']);
+  if (ownT is PdfLiteralString) return decodePdfTextString(ownT.bytes);
+  final parent = doc.resolve(dict['Parent']);
+  if (parent is PdfDictionaryObj) {
+    final parentT = doc.resolve(parent['T']);
+    if (parentT is PdfLiteralString) return decodePdfTextString(parentT.bytes);
+  }
+  return '';
+}
+
+PdfFormField? _parseField(
+  PdfDocument doc,
+  PdfRef ref,
+  PdfDictionaryObj dict,
+  List<PdfDictionaryObj> pages,
+) {
+  final position = _resolveWidgetPosition(doc, ref, dict, pages);
+  if (position == null) return null;
+
   final ft = (doc.resolve(dict['FT']) as PdfName?)?.value;
   final type = ft == 'Btn' ? PdfFormFieldType.checkbox : PdfFormFieldType.text;
-
-  final nameObj = doc.resolve(dict['T']);
-  final name = nameObj is PdfLiteralString
-      ? decodePdfTextString(nameObj.bytes)
-      : '';
+  final name = _fieldName(doc, dict);
 
   var value = '';
   var checked = false;
@@ -130,20 +220,107 @@ PdfFormField? _parseField(
     checked = asObj is PdfName && asObj.value != 'Off';
   }
 
-  final llx = rect[0], lly = rect[1], urx = rect[2], ury = rect[3];
   return PdfFormField(
     ref: ref,
     name: name,
     type: type,
-    pageIndex: pageIndex,
-    normX: (llx - mediaBox[0]) / pageWidth,
-    normY: (mediaBox[3] - ury) / pageHeight,
-    normWidth: (urx - llx) / pageWidth,
-    normHeight: (ury - lly) / pageHeight,
-    rectPoints: (urx - llx, ury - lly),
+    pageIndex: position.pageIndex,
+    normX: position.normX,
+    normY: position.normY,
+    normWidth: position.normWidth,
+    normHeight: position.normHeight,
+    rectPoints: position.rectPoints,
     value: value,
     checked: checked,
   );
+}
+
+PdfFormField? _parseChoiceField(
+  PdfDocument doc,
+  PdfRef ref,
+  PdfDictionaryObj dict,
+  List<PdfDictionaryObj> pages,
+) {
+  final position = _resolveWidgetPosition(doc, ref, dict, pages);
+  if (position == null) return null;
+
+  final options = <String>[];
+  final optObj = doc.resolve(dict['Opt']);
+  if (optObj is PdfArrayObj) {
+    for (final opt in optObj.items) {
+      final resolved = doc.resolve(opt);
+      if (resolved is PdfLiteralString) {
+        options.add(decodePdfTextString(resolved.bytes));
+      } else if (resolved is PdfArrayObj && resolved.items.length >= 2) {
+        final display = doc.resolve(resolved.items[1]);
+        if (display is PdfLiteralString) {
+          options.add(decodePdfTextString(display.bytes));
+        }
+      }
+    }
+  }
+
+  final vObj = doc.resolve(dict['V']);
+  final value = vObj is PdfLiteralString ? decodePdfTextString(vObj.bytes) : '';
+
+  return PdfFormField(
+    ref: ref,
+    name: _fieldName(doc, dict),
+    type: PdfFormFieldType.choice,
+    pageIndex: position.pageIndex,
+    normX: position.normX,
+    normY: position.normY,
+    normWidth: position.normWidth,
+    normHeight: position.normHeight,
+    rectPoints: position.rectPoints,
+    value: value,
+    checked: false,
+    options: options,
+  );
+}
+
+void _parseRadioGroup(
+  PdfDocument doc,
+  PdfRef groupRef,
+  PdfDictionaryObj groupDict,
+  PdfArrayObj kids,
+  List<PdfDictionaryObj> pages,
+  List<PdfFormField> out,
+) {
+  final name = _fieldName(doc, groupDict);
+  final selectedObj = doc.resolve(groupDict['V']);
+  final selectedName = selectedObj is PdfName ? selectedObj.value : null;
+
+  final siblingRefs = <PdfRef>[
+    for (final kidItem in kids.items)
+      if (kidItem is PdfRef) kidItem,
+  ];
+
+  for (final kidRef in siblingRefs) {
+    final kidDict = doc.resolve(kidRef);
+    if (kidDict is! PdfDictionaryObj) continue;
+    final position = _resolveWidgetPosition(doc, kidRef, kidDict, pages);
+    if (position == null) continue;
+    final onState = _onStateName(doc, kidDict);
+
+    out.add(
+      PdfFormField(
+        ref: kidRef,
+        name: name,
+        type: PdfFormFieldType.radio,
+        pageIndex: position.pageIndex,
+        normX: position.normX,
+        normY: position.normY,
+        normWidth: position.normWidth,
+        normHeight: position.normHeight,
+        rectPoints: position.rectPoints,
+        value: onState,
+        checked: onState == selectedName,
+        radioGroupRef: groupRef,
+        radioSiblingRefs: siblingRefs,
+      ),
+    );
+  }
 }
 
 String decodePdfTextString(Uint8List bytes) {
@@ -304,6 +481,52 @@ PdfObjectWrite buildCheckboxToggleWrite({
     generation: field.ref.generation,
     body: Uint8List.fromList(encodeDict(newEntries).codeUnits),
   );
+}
+
+/// Selects one option within a radio button group: sets the group
+/// field's `/V` to the chosen widget's on-state name, and flips every
+/// sibling widget's own `/AS` (selected -> its on-state, everyone else
+/// -> `/Off`) — a radio group's "checked" state genuinely lives across
+/// multiple objects, unlike a standalone checkbox.
+List<PdfObjectWrite> buildRadioSelectionWrites({
+  required PdfDocument doc,
+  required PdfFormField selected,
+}) {
+  final groupRef = selected.radioGroupRef;
+  if (groupRef == null || selected.radioSiblingRefs.isEmpty) {
+    throw PdfNativeEditException('Field is not part of a radio group');
+  }
+  final groupDict = doc.getObject(groupRef);
+  if (groupDict is! PdfDictionaryObj) {
+    throw PdfNativeEditException('Radio group object is not a dictionary');
+  }
+
+  final newGroupEntries = Map<String, PdfObject>.from(groupDict.entries)
+    ..['V'] = PdfName(selected.value);
+  final writes = <PdfObjectWrite>[
+    PdfObjectWrite(
+      objectNumber: groupRef.objectNumber,
+      generation: groupRef.generation,
+      body: Uint8List.fromList(encodeDict(newGroupEntries).codeUnits),
+    ),
+  ];
+
+  for (final siblingRef in selected.radioSiblingRefs) {
+    final siblingDict = doc.getObject(siblingRef);
+    if (siblingDict is! PdfDictionaryObj) continue;
+    final onState = _onStateName(doc, siblingDict);
+    final isSelected = siblingRef == selected.ref;
+    final newEntries = Map<String, PdfObject>.from(siblingDict.entries)
+      ..['AS'] = PdfName(isSelected ? onState : 'Off');
+    writes.add(
+      PdfObjectWrite(
+        objectNumber: siblingRef.objectNumber,
+        generation: siblingRef.generation,
+        body: Uint8List.fromList(encodeDict(newEntries).codeUnits),
+      ),
+    );
+  }
+  return writes;
 }
 
 String _onStateName(PdfDocument doc, PdfDictionaryObj dict) {

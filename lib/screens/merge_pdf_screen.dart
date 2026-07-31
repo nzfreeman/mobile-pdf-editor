@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../services/android_file_service.dart';
-import '../services/pdf_service.dart';
+import '../services/pdf_native/pdf_merge_split_service.dart';
 
 class MergePdfScreen extends StatefulWidget {
   const MergePdfScreen({super.key, required this.initialFiles});
@@ -35,9 +35,9 @@ class _MergePdfScreenState extends State<MergePdfScreen> {
     }
     setState(() => _busy = true);
     try {
-      final output = await PdfService.mergePdfFiles(
+      final output = await PdfMergeSplitService.merge(
         files: _files.map((file) => File(file.path)).toList(),
-        sourceName: 'merged.pdf',
+        outputName: 'merged.pdf',
       );
       final saved = await AndroidFileService.savePdf(
         sourcePath: output.path,

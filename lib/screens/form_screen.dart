@@ -90,53 +90,84 @@ class _FormScreenState extends State<FormScreen> {
     return result;
   }
 
-  Future<void> _onFieldTap(PdfFormField field) async {
-    if (_placementMode != null) return;
-    if (field.type == PdfFormFieldType.checkbox) {
-      setState(() => _busy = true);
-      try {
-        final edited = await PdfFormService.toggleCheckbox(
-          file: _currentFile,
-          field: field,
-          checked: !field.checked,
-        );
-        _currentFile = edited;
-        await _load();
-      } catch (error) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('체크박스 변경 실패: $error')));
-        }
-      } finally {
-        if (mounted) setState(() => _busy = false);
-      }
-      return;
-    }
-
-    final newValue = await _promptText(
-      title: field.name.isEmpty ? '값 입력' : field.name,
-      initialText: field.value,
-    );
-    if (newValue == null || newValue == field.value || !mounted) return;
-
+  Future<void> _runFieldEdit(Future<File> Function() action, String failureMessage) async {
     setState(() => _busy = true);
     try {
-      final edited = await PdfFormService.setTextFieldValue(
-        file: _currentFile,
-        field: field,
-        newValue: newValue,
-      );
+      final edited = await action();
       _currentFile = edited;
       await _load();
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('입력란 저장 실패: $error')));
+        ).showSnackBar(SnackBar(content: Text('$failureMessage: $error')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _onFieldTap(PdfFormField field) async {
+    if (_placementMode != null) return;
+
+    switch (field.type) {
+      case PdfFormFieldType.checkbox:
+        await _runFieldEdit(
+          () => PdfFormService.toggleCheckbox(
+            file: _currentFile,
+            field: field,
+            checked: !field.checked,
+          ),
+          '체크박스 변경 실패',
+        );
+      case PdfFormFieldType.radio:
+        if (field.checked) return; // already selected
+        await _runFieldEdit(
+          () => PdfFormService.selectRadioOption(file: _currentFile, selected: field),
+          '라디오 버튼 선택 실패',
+        );
+      case PdfFormFieldType.choice:
+        final choice = await showModalBottomSheet<String>(
+          context: context,
+          builder: (sheetContext) => SafeArea(
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final option in field.options)
+                  ListTile(
+                    title: Text(option),
+                    trailing: option == field.value
+                        ? const Icon(Icons.check)
+                        : null,
+                    onTap: () => Navigator.pop(sheetContext, option),
+                  ),
+              ],
+            ),
+          ),
+        );
+        if (choice == null || choice == field.value || !mounted) return;
+        await _runFieldEdit(
+          () => PdfFormService.setTextFieldValue(
+            file: _currentFile,
+            field: field,
+            newValue: choice,
+          ),
+          '선택 항목 저장 실패',
+        );
+      case PdfFormFieldType.text:
+        final newValue = await _promptText(
+          title: field.name.isEmpty ? '값 입력' : field.name,
+          initialText: field.value,
+        );
+        if (newValue == null || newValue == field.value || !mounted) return;
+        await _runFieldEdit(
+          () => PdfFormService.setTextFieldValue(
+            file: _currentFile,
+            field: field,
+            newValue: newValue,
+          ),
+          '입력란 저장 실패',
+        );
     }
   }
 
@@ -356,49 +387,7 @@ class _FormScreenState extends State<FormScreen> {
                       child: GestureDetector(
                         behavior: HitTestBehavior.opaque,
                         onTap: () => _onFieldTap(field),
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: (field.type == PdfFormFieldType.checkbox
-                                    ? (field.checked ? Colors.green : Colors.blue)
-                                    : Colors.blue)
-                                .withValues(alpha: 0.15),
-                            border: Border.all(
-                              color: field.type == PdfFormFieldType.checkbox
-                                  ? (field.checked ? Colors.green : Colors.blue)
-                                  : Colors.blue,
-                              width: 1.5,
-                            ),
-                          ),
-                          child: field.type == PdfFormFieldType.checkbox
-                              ? (field.checked
-                                    ? const Icon(
-                                        Icons.check,
-                                        size: 16,
-                                        color: Colors.green,
-                                      )
-                                    : null)
-                              : Align(
-                                  alignment: Alignment.centerLeft,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                    ),
-                                    child: Text(
-                                      field.value.isEmpty
-                                          ? field.name
-                                          : field.value,
-                                      overflow: TextOverflow.ellipsis,
-                                      maxLines: 1,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        color: field.value.isEmpty
-                                            ? Colors.blue.withValues(alpha: 0.6)
-                                            : Colors.black87,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                        ),
+                        child: _fieldContent(field),
                       ),
                     ),
                 ],
@@ -406,6 +395,73 @@ class _FormScreenState extends State<FormScreen> {
             ),
           ),
         );
+      },
+    );
+  }
+
+  Widget _fieldContent(PdfFormField field) {
+    final isOnState =
+        field.type == PdfFormFieldType.checkbox || field.type == PdfFormFieldType.radio;
+    final color = isOnState
+        ? (field.checked ? Colors.green : Colors.blue)
+        : Colors.blue;
+    final isRadio = field.type == PdfFormFieldType.radio;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.15),
+        border: Border.all(color: color, width: 1.5),
+        shape: isRadio ? BoxShape.circle : BoxShape.rectangle,
+      ),
+      child: switch (field.type) {
+        PdfFormFieldType.checkbox =>
+          field.checked
+              ? const Icon(Icons.check, size: 16, color: Colors.green)
+              : null,
+        PdfFormFieldType.radio =>
+          field.checked
+              ? const Center(
+                  child: Icon(Icons.circle, size: 10, color: Colors.green),
+                )
+              : null,
+        PdfFormFieldType.choice => Row(
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Text(
+                    field.value.isEmpty ? field.name : field.value,
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: field.value.isEmpty
+                          ? Colors.blue.withValues(alpha: 0.6)
+                          : Colors.black87,
+                    ),
+                  ),
+                ),
+              ),
+              const Icon(Icons.arrow_drop_down, size: 16, color: Colors.blue),
+            ],
+          ),
+        PdfFormFieldType.text => Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                field.value.isEmpty ? field.name : field.value,
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: field.value.isEmpty
+                      ? Colors.blue.withValues(alpha: 0.6)
+                      : Colors.black87,
+                ),
+              ),
+            ),
+          ),
       },
     );
   }

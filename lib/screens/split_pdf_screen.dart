@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../services/pdf_native/pdf_merge_split_service.dart';
 import '../services/pdf_service.dart';
 
 class SplitPdfScreen extends StatefulWidget {
@@ -60,7 +61,7 @@ class _SplitPdfScreenState extends State<SplitPdfScreen> {
     }
     setState(() => _busy = true);
     try {
-      final outputs = await PdfService.splitPdf(
+      final outputs = await PdfMergeSplitService.split(
         file: widget.file,
         pageGroups: groups,
         sourceName: widget.fileName,
