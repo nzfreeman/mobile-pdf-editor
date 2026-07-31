@@ -43,6 +43,18 @@ class PdfObjectCopier {
       if (k == 'Parent') return;
       entries[k] = _remap(doc, v);
     });
+    // Many producers put MediaBox/Resources/CropBox/Rotate on an
+    // ancestor Pages node rather than repeating them on every leaf page
+    // (perfectly legal — they're inheritable). Since we deliberately
+    // don't copy /Parent (that would drag in the whole original Pages
+    // tree), a page relying on that inheritance would otherwise lose
+    // its dimensions/resources/rotation entirely in the output. Inline
+    // whichever of these the page doesn't already define directly.
+    for (final key in const ['MediaBox', 'Resources', 'CropBox', 'Rotate']) {
+      if (entries.containsKey(key)) continue;
+      final inherited = doc.inheritedAttribute(page, key);
+      if (inherited != null) entries[key] = _remap(doc, inherited);
+    }
     _objects[newNum] = PdfDictionaryObj(entries);
     return newNum;
   }

@@ -77,6 +77,18 @@ class PdfDocument {
     if (!sawAnyTrailer || !trailerEntries.containsKey('Root')) {
       throw PdfParseException('No trailer with /Root found');
     }
+    if (trailerEntries.containsKey('Encrypt')) {
+      // Encryption isn't implemented anywhere in this reader: string and
+      // stream bytes would still be ciphertext after "successfully"
+      // parsing the (unencrypted) object structure around them. Silently
+      // continuing would produce a file that *parses* fine but whose
+      // content streams/strings are garbage — exactly the kind of
+      // silent-corruption failure mode this reader should never have.
+      // Fail loudly here instead, once, for every pdf_native feature.
+      throw PdfParseException(
+        'Encrypted PDFs are not supported by this reader',
+      );
+    }
     return PdfDocument._(bytes, xref, PdfDictionaryObj(trailerEntries));
   }
 

@@ -166,16 +166,20 @@ _resolveWidgetPosition(
 
   final page = pages[pageIndex];
   final mediaBoxObj = doc.inheritedAttribute(page, 'MediaBox');
-  final mediaBox = mediaBoxObj is PdfArrayObj
-      ? mediaBoxObj.items
-            .map((o) => (doc.resolve(o) as PdfNumber?)?.doubleValue ?? 0.0)
-            .toList()
-      : [0.0, 0.0, 612.0, 792.0];
+  final mediaBox = _normalizeBox(
+    mediaBoxObj is PdfArrayObj
+        ? mediaBoxObj.items
+              .map((o) => (doc.resolve(o) as PdfNumber?)?.doubleValue ?? 0.0)
+              .toList()
+        : [0.0, 0.0, 612.0, 792.0],
+  );
   final pageWidth = mediaBox[2] - mediaBox[0];
   final pageHeight = mediaBox[3] - mediaBox[1];
   if (pageWidth <= 0 || pageHeight <= 0) return null;
 
-  final llx = rect[0], lly = rect[1], urx = rect[2], ury = rect[3];
+  final normalizedRect = _normalizeBox(rect);
+  final llx = normalizedRect[0], lly = normalizedRect[1];
+  final urx = normalizedRect[2], ury = normalizedRect[3];
   return (
     pageIndex: pageIndex,
     normX: (llx - mediaBox[0]) / pageWidth,
@@ -321,6 +325,22 @@ void _parseRadioGroup(
       ),
     );
   }
+}
+
+/// `/Rect` and `/MediaBox` arrays are `[llx lly urx ury]` by convention,
+/// but the PDF spec explicitly permits either corner to be given first
+/// (readers "should" normalize them) — a handful of real-world producers
+/// do write them backwards. Using such a box unnormalized would produce
+/// negative widths/heights, which then propagate into things like an
+/// appearance stream's `/BBox` (invalid PDF) or a negative-size overlay
+/// rectangle in the UI, rather than failing safely.
+List<double> _normalizeBox(List<double> box) {
+  if (box.length < 4) return [0.0, 0.0, 612.0, 792.0];
+  final x0 = box[0] < box[2] ? box[0] : box[2];
+  final x1 = box[0] < box[2] ? box[2] : box[0];
+  final y0 = box[1] < box[3] ? box[1] : box[3];
+  final y1 = box[1] < box[3] ? box[3] : box[1];
+  return [x0, y0, x1, y1];
 }
 
 String decodePdfTextString(Uint8List bytes) {
@@ -555,11 +575,13 @@ String _onStateName(PdfDocument doc, PdfDictionaryObj dict) {
   required double normHeight,
 }) {
   final mediaBoxObj = doc.inheritedAttribute(page, 'MediaBox');
-  final mediaBox = mediaBoxObj is PdfArrayObj
-      ? mediaBoxObj.items
-            .map((o) => (doc.resolve(o) as PdfNumber?)?.doubleValue ?? 0.0)
-            .toList()
-      : [0.0, 0.0, 612.0, 792.0];
+  final mediaBox = _normalizeBox(
+    mediaBoxObj is PdfArrayObj
+        ? mediaBoxObj.items
+              .map((o) => (doc.resolve(o) as PdfNumber?)?.doubleValue ?? 0.0)
+              .toList()
+        : [0.0, 0.0, 612.0, 792.0],
+  );
   final pageWidth = mediaBox[2] - mediaBox[0];
   final pageHeight = mediaBox[3] - mediaBox[1];
 
@@ -666,11 +688,13 @@ String _checkmarkPath(double width, double height) {
   required double normHeight,
 }) {
   final mediaBoxObj = doc.inheritedAttribute(page, 'MediaBox');
-  final mediaBox = mediaBoxObj is PdfArrayObj
-      ? mediaBoxObj.items
-            .map((o) => (doc.resolve(o) as PdfNumber?)?.doubleValue ?? 0.0)
-            .toList()
-      : [0.0, 0.0, 612.0, 792.0];
+  final mediaBox = _normalizeBox(
+    mediaBoxObj is PdfArrayObj
+        ? mediaBoxObj.items
+              .map((o) => (doc.resolve(o) as PdfNumber?)?.doubleValue ?? 0.0)
+              .toList()
+        : [0.0, 0.0, 612.0, 792.0],
+  );
   final pageWidth = mediaBox[2] - mediaBox[0];
   final pageHeight = mediaBox[3] - mediaBox[1];
 
