@@ -104,6 +104,30 @@ class PdfDocument {
   /// incremental-update writer to splice edited stream bytes back in.
   int? directOffsetOf(int objectNumber) => _xref[objectNumber]?.offset;
 
+  /// The indirect reference [obj] was originally loaded through, if any
+  /// — found via the parse cache (which always returns the same instance
+  /// for a given ref), so this only works for objects previously fetched
+  /// through [getObject]/[resolve]/[pages]. Used when we need to graft a
+  /// modified revision of an object we only have a resolved value for
+  /// (e.g. rewriting a Page's Resources).
+  PdfRef? refOf(PdfObject obj) {
+    for (final entry in _cache.entries) {
+      if (identical(entry.value, obj)) return PdfRef(entry.key, 0);
+    }
+    return null;
+  }
+
+  /// Lowest object number guaranteed not to collide with any object
+  /// already in the file — the starting point for allocating new objects
+  /// (e.g. an embedded fallback font) in an incremental update.
+  int allocateNewObjectNumbers(int count) {
+    var highest = (trailer['Size'] as PdfNumber?)?.intValue ?? 0;
+    for (final objNum in _xref.keys) {
+      if (objNum >= highest) highest = objNum + 1;
+    }
+    return highest;
+  }
+
   /// Resolves indirect references to their target object; returns non-ref
   /// objects unchanged.
   PdfObject? resolve(PdfObject? obj) {

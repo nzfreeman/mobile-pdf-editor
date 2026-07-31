@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'pdf_content_stream.dart';
+import 'pdf_font_embedder.dart';
 
 class PdfRunNotEditableException implements Exception {
   PdfRunNotEditableException(this.message);
@@ -12,17 +13,33 @@ class PdfRunNotEditableException implements Exception {
 
 /// Builds the raw content-stream bytes that replace a [PdfTextRun]'s
 /// original operator: a white rectangle covering the original glyphs,
-/// followed by the new text drawn with the same font/resource at the same
-/// origin. The whole thing is wrapped in `q ... cm ... Q` using the
-/// inverse of the run's own CTM, so the coordinates below can be given
-/// directly in absolute page space regardless of whatever transform was
-/// active when the original text was drawn.
-Uint8List buildReplacementOperatorBytes(PdfTextRun run, String newText) {
-  final encoded = run.font.encode(newText);
+/// followed by the new text drawn at the same origin/size. The whole
+/// thing is wrapped in `q ... cm ... Q` using the inverse of the run's
+/// own CTM, so the coordinates below can be given directly in absolute
+/// page space regardless of whatever transform was active when the
+/// original text was drawn.
+///
+/// Font selection: the run's own font resource is used whenever it can
+/// represent [newText] (see [PdfFontInfo.encode]). When it can't —
+/// [fallbackFont] is supplied and *it* can represent the text — the
+/// fallback font resource is used to draw the whole replacement instead,
+/// which is simpler and more predictable than trying to mix fonts
+/// mid-run for a handful of unrepresentable characters.
+Uint8List buildReplacementOperatorBytes(
+  PdfTextRun run,
+  String newText, {
+  EmbeddedCidFont? fallbackFont,
+}) {
+  var encoded = run.font.encode(newText);
+  var fontResourceName = run.fontResourceName;
+  if (encoded == null) {
+    encoded = fallbackFont?.encode(newText);
+    fontResourceName = fallbackFont?.resourceName ?? fontResourceName;
+  }
   if (encoded == null) {
     throw PdfRunNotEditableException(
-      'Font for this run cannot re-encode the replacement text '
-      '(CID/Type0 fonts are read-only in this implementation)',
+      'Neither the original font nor the fallback font can represent '
+      'the replacement text',
     );
   }
   final inverseCtm = run.ctm.inverse;
@@ -51,7 +68,7 @@ Uint8List buildReplacementOperatorBytes(PdfTextRun run, String newText) {
     )
     ..writeln('0 0 0 rg')
     ..writeln('BT')
-    ..writeln('/${run.fontResourceName} ${_fmt(run.fontSize)} Tf')
+    ..writeln('/$fontResourceName ${_fmt(run.fontSize)} Tf')
     ..writeln('${_fmt(run.originX)} ${_fmt(run.originY)} Td');
 
   final head = buffer.toString();

@@ -321,28 +321,35 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
 
     setState(() => _recognizing = true);
     try {
-      final edited = await PdfNativeTextService.replaceRunText(
+      final result = await PdfNativeTextService.replaceRunText(
         file: _currentFile,
+        pageIndex: _pageIndex,
         run: selected,
         newText: newText,
       );
-      _currentFile = edited;
+      _currentFile = result.file;
       _hasNativeTextEdits = true;
       await _load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('원본 폰트를 유지한 채 텍스트를 수정했습니다.')),
+          SnackBar(
+            content: Text(
+              result.usedFallbackFont
+                  ? '원본에 없는 글자가 있어 대체 폰트로 텍스트를 수정했습니다.'
+                  : '원본 폰트를 유지한 채 텍스트를 수정했습니다.',
+            ),
+          ),
         );
       }
     } on PdfRunNotEditableException {
-      // This font can't represent one or more characters in the
-      // replacement text (e.g. a brand-new character never embedded
-      // anywhere else in the document) — fall back to the OCR overlay,
-      // which can draw arbitrary text using the app's own bundled font.
+      // Neither the original font nor the bundled fallback font can
+      // represent this text (a genuine rarity) — fall back to the OCR
+      // overlay, which can draw arbitrary text using the app's own UI
+      // font instead of a real embedded PDF font.
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('이 글자는 원본 폰트에 없어 OCR 방식으로 전환합니다.'),
+            content: Text('이 글자는 표현할 수 있는 폰트가 없어 OCR 방식으로 전환합니다.'),
           ),
         );
       }
