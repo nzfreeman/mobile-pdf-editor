@@ -71,6 +71,15 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   double _zoomScale = 1;
   List<DrawingPoint> _activeStroke = [];
 
+  /// The selection handles (rotate/resize/delete) live inside the same
+  /// InteractiveViewer-transformed subtree as the page content, so
+  /// without this they'd visually grow with the zoom level along with
+  /// everything else — at high zoom they end up covering most of the
+  /// screen. Scaling them by the inverse of the current zoom keeps their
+  /// on-screen size constant regardless of how far the user has zoomed
+  /// in. Clamped so they never shrink to the point of being untappable.
+  double get _inverseZoom => (1 / _zoomScale).clamp(0.25, 1.0);
+
   EditorItem? get _selectedItem {
     final id = _selectedId;
     if (id == null) return null;
@@ -1598,7 +1607,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
             ),
             if (selected) ...[
               Positioned(
-                top: -58,
+                top: -58 * _inverseZoom,
                 left: 0,
                 right: 0,
                 child: Center(
@@ -1633,17 +1642,20 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                       _rotateStartAngle = null;
                       setState(() => _rotatingItem = false);
                     },
-                    child: _handle(
-                      icon: Icons.rotate_right,
-                      tooltip: '좌우로 드래그하여 회전',
-                      active: _rotatingItem,
+                    child: Transform.scale(
+                      scale: _inverseZoom,
+                      child: _handle(
+                        icon: Icons.rotate_right,
+                        tooltip: '좌우로 드래그하여 회전',
+                        active: _rotatingItem,
+                      ),
                     ),
                   ),
                 ),
               ),
               Positioned(
-                right: -25,
-                bottom: -25,
+                right: -25 * _inverseZoom,
+                bottom: -25 * _inverseZoom,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onPanStart: (_) {
@@ -1672,23 +1684,29 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                   },
                   onPanEnd: (_) => setState(() => _resizingItem = false),
                   onPanCancel: () => setState(() => _resizingItem = false),
-                  child: _handle(
-                    icon: Icons.open_in_full,
-                    tooltip: '드래그하여 크기 조절',
-                    active: _resizingItem,
+                  child: Transform.scale(
+                    scale: _inverseZoom,
+                    child: _handle(
+                      icon: Icons.open_in_full,
+                      tooltip: '드래그하여 크기 조절',
+                      active: _resizingItem,
+                    ),
                   ),
                 ),
               ),
               Positioned(
-                left: -25,
-                top: -25,
+                left: -25 * _inverseZoom,
+                top: -25 * _inverseZoom,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
                   onTap: _deleteSelected,
-                  child: _handle(
-                    icon: Icons.close,
-                    tooltip: '삭제',
-                    danger: true,
+                  child: Transform.scale(
+                    scale: _inverseZoom,
+                    child: _handle(
+                      icon: Icons.close,
+                      tooltip: '삭제',
+                      danger: true,
+                    ),
                   ),
                 ),
               ),
