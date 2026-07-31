@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../services/android_file_service.dart';
 import '../services/pdf_native/pdf_merge_split_service.dart';
+import '../widgets/experimental_pdf_notice.dart';
 
 class MergePdfScreen extends StatefulWidget {
   const MergePdfScreen({super.key, required this.initialFiles});
@@ -17,6 +18,7 @@ class MergePdfScreen extends StatefulWidget {
 class _MergePdfScreenState extends State<MergePdfScreen> {
   late final List<SelectedPdfFile> _files = List.of(widget.initialFiles);
   bool _busy = false;
+  bool _shownNotice = false;
 
   Future<void> _addMore() async {
     final picked = await AndroidFileService.pickMultiplePdfs();
@@ -33,6 +35,12 @@ class _MergePdfScreenState extends State<MergePdfScreen> {
       ).showSnackBar(const SnackBar(content: Text('병합하려면 2개 이상의 PDF가 필요합니다.')));
       return;
     }
+    if (!_shownNotice) {
+      final proceed = await showExperimentalPdfNotice(context, featureName: 'PDF 병합');
+      if (!mounted || !proceed) return;
+      _shownNotice = true;
+    }
+
     setState(() => _busy = true);
     try {
       final output = await PdfMergeSplitService.merge(

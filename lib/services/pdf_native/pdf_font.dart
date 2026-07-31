@@ -103,11 +103,26 @@ PdfFontInfo _resolveType0Font(PdfDocument doc, PdfDictionaryObj fontDict) {
       (doc.resolve(descendantDict['DW']) as PdfNumber?)?.doubleValue ?? 1000;
   final widthMap = _parseCidWidths(doc, doc.resolve(descendantDict['W']));
 
+  // This reader always chunks character codes as exactly 2 bytes, which
+  // only /Encoding /Identity-H and /Identity-V actually guarantee. Other
+  // predefined or embedded CMaps (e.g. legacy 90ms-RKSJ-H/UniGB-UCS2-H,
+  // or a custom CMap with a variable-width codespace) can use 1-, 3-, or
+  // 4-byte codes — decoding those with fixed 2-byte chunks wouldn't just
+  // fail cleanly, it would silently misalign every code after the first
+  // variable-width one and produce wrong (not just missing) text. Treat
+  // anything other than Identity-H/V as fully unreadable rather than
+  // guess: safe placeholders throughout beat plausible-looking garbage.
+  final encodingName = (doc.resolve(fontDict['Encoding']) as PdfName?)?.value;
+  final hasFixedTwoByteCodes =
+      encodingName == 'Identity-H' || encodingName == 'Identity-V';
+
   Map<int, String>? toUnicode;
-  final toUnicodeObj = doc.resolve(fontDict['ToUnicode']);
-  if (toUnicodeObj is PdfStreamObj) {
-    final decoded = doc.decodeStream(toUnicodeObj);
-    toUnicode = parseToUnicodeCMap(String.fromCharCodes(decoded));
+  if (hasFixedTwoByteCodes) {
+    final toUnicodeObj = doc.resolve(fontDict['ToUnicode']);
+    if (toUnicodeObj is PdfStreamObj) {
+      final decoded = doc.decodeStream(toUnicodeObj);
+      toUnicode = parseToUnicodeCMap(String.fromCharCodes(decoded));
+    }
   }
 
   // Inverting the font's own ToUnicode map gives Unicode -> CID for every

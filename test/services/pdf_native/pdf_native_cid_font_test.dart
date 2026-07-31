@@ -11,7 +11,10 @@ import 'package:mobile_pdf_editor/services/pdf_native/pdf_native_edit_builder.da
 /// Hangul (which can't fit in a single-byte simple-font encoding). This
 /// exercises the read-only CID path specifically — the one Korean
 /// documents will actually hit.
-Uint8List _buildCidFontPdf({bool includeToUnicode = true}) {
+Uint8List _buildCidFontPdf({
+  bool includeToUnicode = true,
+  String encoding = 'Identity-H',
+}) {
   // Two 2-byte CIDs (0x0001, 0x0002), mapped via ToUnicode to '가' (AC00)
   // and '나' (B098) — non-sequential code points, so bfchar (not bfrange)
   // is the correct way to express this mapping.
@@ -37,7 +40,7 @@ endcmap
   final toUnicodeEntry = includeToUnicode ? ' /ToUnicode 7 0 R' : '';
   objects['4'] =
       '4 0 obj\n<< /Type /Font /Subtype /Type0 /BaseFont /TestCid '
-              '/Encoding /Identity-H /DescendantFonts [6 0 R]$toUnicodeEntry >>\nendobj\n'
+              '/Encoding /$encoding /DescendantFonts [6 0 R]$toUnicodeEntry >>\nendobj\n'
           .codeUnits;
   objects['6'] =
       '6 0 obj\n<< /Type /Font /Subtype /CIDFontType2 /BaseFont /TestCid '
@@ -152,6 +155,26 @@ void main() {
         () => buildReplacementOperatorBytes(run, '다'),
         throwsA(isA<PdfRunNotEditableException>()),
       );
+    },
+  );
+
+  test(
+    'a non-Identity-H/V CMap is treated as unreadable rather than decoded with '
+    'the fixed 2-byte assumption that would silently misalign variable-width codes',
+    () {
+      final pdfBytes = _buildCidFontPdf(encoding: 'UniGB-UCS2-H');
+      final doc = PdfDocument.parse(pdfBytes);
+      final runs = extractTextRuns(doc, doc.pages.single);
+
+      expect(runs, hasLength(1));
+      expect(
+        runs.single.text,
+        contains('�'),
+        reason:
+            'this reader only trusts the fixed 2-byte-per-code guarantee that '
+            'Identity-H/V make; other CMaps may use variable-width codes',
+      );
+      expect(runs.single.isEditable, isFalse);
     },
   );
 }

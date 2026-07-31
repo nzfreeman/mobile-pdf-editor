@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../services/pdf_native/pdf_merge_split_service.dart';
 import '../services/pdf_service.dart';
+import '../widgets/experimental_pdf_notice.dart';
 
 class SplitPdfScreen extends StatefulWidget {
   const SplitPdfScreen({super.key, required this.file, required this.fileName});
@@ -21,6 +22,7 @@ class _SplitPdfScreenState extends State<SplitPdfScreen> {
   final Set<int> _splitAfter = {};
   bool _loading = true;
   bool _busy = false;
+  bool _shownNotice = false;
 
   @override
   void initState() {
@@ -59,6 +61,12 @@ class _SplitPdfScreenState extends State<SplitPdfScreen> {
       );
       return;
     }
+    if (!_shownNotice) {
+      final proceed = await showExperimentalPdfNotice(context, featureName: 'PDF 분할');
+      if (!mounted || !proceed) return;
+      _shownNotice = true;
+    }
+
     setState(() => _busy = true);
     try {
       final outputs = await PdfMergeSplitService.split(

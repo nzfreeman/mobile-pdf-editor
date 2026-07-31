@@ -15,6 +15,7 @@ import '../services/pdf_native/pdf_content_stream.dart';
 import '../services/pdf_native/pdf_native_edit_builder.dart';
 import '../services/pdf_native/pdf_native_text_service.dart';
 import '../services/pdf_service.dart';
+import '../widgets/experimental_pdf_notice.dart';
 
 class PdfEditorScreen extends StatefulWidget {
   const PdfEditorScreen({
@@ -63,6 +64,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   bool _recognizing = false;
   late File _currentFile = widget.pdfFile;
   bool _hasNativeTextEdits = false;
+  bool _shownNativeEditNotice = false;
   final Map<String, GlobalKey> _itemContentKeys = {};
   double? _rotateStartAngle;
   double _rotateStartRotation = 0;
@@ -248,6 +250,14 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   /// same font — see PdfFontInfo.encode).
   Future<void> _editExistingText() async {
     if (_pages.isEmpty) return;
+    if (!_shownNativeEditNotice) {
+      final proceed = await showExperimentalPdfNotice(
+        context,
+        featureName: '원본 폰트 유지 텍스트 편집',
+      );
+      if (!mounted || !proceed) return;
+      _shownNativeEditNotice = true;
+    }
     setState(() => _recognizing = true);
     List<PdfNativePage> nativePages;
     try {

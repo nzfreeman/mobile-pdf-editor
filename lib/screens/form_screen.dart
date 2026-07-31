@@ -7,6 +7,7 @@ import '../services/android_file_service.dart';
 import '../services/pdf_native/pdf_form_fields.dart';
 import '../services/pdf_native/pdf_form_service.dart';
 import '../services/pdf_service.dart';
+import '../widgets/experimental_pdf_notice.dart';
 
 enum _PlacementMode { text, checkbox }
 
@@ -37,7 +38,20 @@ class _FormScreenState extends State<FormScreen> {
   @override
   void initState() {
     super.initState();
-    _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _showNoticeThenLoad());
+  }
+
+  Future<void> _showNoticeThenLoad() async {
+    final proceed = await showExperimentalPdfNotice(
+      context,
+      featureName: '양식 작성/채우기',
+    );
+    if (!mounted) return;
+    if (!proceed) {
+      Navigator.pop(context);
+      return;
+    }
+    await _load();
   }
 
   Future<void> _load() async {
