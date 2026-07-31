@@ -250,9 +250,11 @@ List<PdfTextRun> extractTextRuns(PdfDocument doc, PdfDictionaryObj page) {
         operands.add(PdfArrayObj(items));
         continue;
       case PdfTokenType.dictStart:
-        // Inline image dicts (BI...ID...EI) or marked-content property
-        // dicts aren't relevant to text extraction; skip to the matching
-        // dictEnd shallowly.
+        // A marked-content property list (BDC/DP operand) — not relevant
+        // to text extraction; skip to the matching dictEnd. (Inline
+        // images' BI...ID...EI use bare key/value pairs, not a `<< >>`
+        // dict, so they don't hit this case — see the 'BI' operator
+        // handling below instead.)
         var depth = 1;
         while (depth > 0) {
           final t = lexer.next();
@@ -366,6 +368,20 @@ List<PdfTextRun> extractTextRuns(PdfDocument doc, PdfDictionaryObj page) {
           }
           handleShow(buffer.toString(), operatorStart!, token.end);
         }
+      case 'BI':
+        // Inline image: its parameter list is bare key/value pairs (not
+        // a `<< >>` dict), tokenizable normally, so just consume up to
+        // 'ID'. What follows ID is raw, arbitrary binary image data —
+        // not PDF syntax at all — so it must be skipped by scanning
+        // bytes directly rather than fed through the generic tokenizer,
+        // which could otherwise misinterpret bytes within it (e.g. an
+        // unmatched '(') and lose its place for everything after.
+        while (true) {
+          final t = lexer.next();
+          if (t.type == PdfTokenType.eof) break;
+          if (t.type == PdfTokenType.keyword && t.text == 'ID') break;
+        }
+        _skipInlineImageData(lexer);
       default:
         break;
     }
@@ -373,6 +389,49 @@ List<PdfTextRun> extractTextRuns(PdfDocument doc, PdfDictionaryObj page) {
   }
 
   return runs;
+}
+
+bool _isInlineImageWhitespaceByte(int b) =>
+    b == 0 || b == 9 || b == 10 || b == 12 || b == 13 || b == 32;
+
+bool _isInlineImageDelimiterByte(int b) =>
+    b == 0x28 ||
+    b == 0x29 ||
+    b == 0x3C ||
+    b == 0x3E ||
+    b == 0x5B ||
+    b == 0x5D ||
+    b == 0x7B ||
+    b == 0x7D ||
+    b == 0x2F ||
+    b == 0x25;
+
+/// Advances [lexer] past an inline image's raw data (everything between
+/// `ID` and the terminating `EI`) without tokenizing it. `EI` is only
+/// treated as the real terminator when it's bounded by whitespace/a
+/// delimiter on both sides — a heuristic (binary data could in principle
+/// contain a stray whitespace-EI-whitespace sequence), but the one PDF
+/// viewers themselves use, since the format provides no length-prefixed
+/// alternative in general.
+void _skipInlineImageData(PdfLexer lexer) {
+  final bytes = lexer.bytes;
+  var pos = lexer.pos;
+  if (pos < bytes.length && _isInlineImageWhitespaceByte(bytes[pos])) pos++;
+  final dataStart = pos;
+
+  for (var i = dataStart; i + 1 < bytes.length; i++) {
+    if (bytes[i] != 0x45 || bytes[i + 1] != 0x49) continue; // 'E', 'I'
+    final before = i == dataStart || _isInlineImageWhitespaceByte(bytes[i - 1]);
+    final afterIndex = i + 2;
+    final after = afterIndex >= bytes.length ||
+        _isInlineImageWhitespaceByte(bytes[afterIndex]) ||
+        _isInlineImageDelimiterByte(bytes[afterIndex]);
+    if (before && after) {
+      lexer.pos = afterIndex;
+      return;
+    }
+  }
+  lexer.pos = bytes.length;
 }
 
 Uint8List concatenatedBytesOf(PdfDocument doc, PdfDictionaryObj page) =>
