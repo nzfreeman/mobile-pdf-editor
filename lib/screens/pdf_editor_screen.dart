@@ -61,8 +61,14 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   Color _drawColor = Colors.black;
   double _drawStrokeWidth = 3;
   bool _showMoreToolsIndicator = true;
-  bool _resizingItem = false;
-  bool _rotatingItem = false;
+
+  /// Tap-to-toggle mode for the selected item's rotate/resize handles:
+  /// null (neither active), 'rotate', or 'resize'. While set, dragging
+  /// anywhere on the item rotates/resizes it instead of moving it — the
+  /// handle icon itself is now a mode toggle, not something you drag
+  /// directly (small drag targets on a floating circle were fiddly;
+  /// this also matches how most mobile editors handle this).
+  String? _activeGizmoMode;
   bool _recognizing = false;
   late File _currentFile = widget.pdfFile;
   bool _hasNativeTextEdits = false;
@@ -137,6 +143,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         ..clear()
         ..addAll(_undo.removeLast().map((item) => item.copy()));
       _selectedId = null;
+      _activeGizmoMode = null;
     });
   }
 
@@ -148,6 +155,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         ..clear()
         ..addAll(_redo.removeLast().map((item) => item.copy()));
       _selectedId = null;
+      _activeGizmoMode = null;
     });
   }
 
@@ -568,7 +576,32 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       _items.removeWhere((item) => item.id == _selectedId);
       _itemContentKeys.remove(_selectedId);
       _selectedId = null;
+      _activeGizmoMode = null;
     });
+  }
+
+  Future<void> _confirmDeleteSelected() async {
+    if (_selectedId == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('개체를 삭제하시겠습니까?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) _deleteSelected();
   }
 
   GlobalKey _contentKeyFor(String itemId) =>
@@ -933,6 +966,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                       setState(() {
                         _pageIndex = index;
                         _selectedId = null;
+                        _activeGizmoMode = null;
                         _activeStroke = [];
                       });
                       _resetView();
@@ -987,6 +1021,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 setState(() {
                   _drawingMode = !_drawingMode;
                   _selectedId = null;
+                  _activeGizmoMode = null;
                   _activeStroke = [];
                 });
                 _resetView();
@@ -1147,7 +1182,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                     _toolbarAction(
                       icon: Icons.delete_outline,
                       label: '삭제',
-                      onTap: _deleteSelected,
+                      onTap: _confirmDeleteSelected,
                       danger: true,
                     ),
                   ],
@@ -1400,7 +1435,12 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: () {
-                        if (!_drawingMode) setState(() => _selectedId = null);
+                        if (!_drawingMode) {
+                          setState(() {
+                            _selectedId = null;
+                            _activeGizmoMode = null;
+                          });
+                        }
                       },
                       onDoubleTap: _drawingMode ? null : _toggleZoom,
                       onPanStart: _drawingMode
@@ -1552,6 +1592,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 onTap: () {
                   if (!_drawingMode) {
                     setState(() {
+                      if (_selectedId != item.id) _activeGizmoMode = null;
                       _selectedId = item.id;
                       _showMoreToolsIndicator = true;
                     });
@@ -1563,13 +1604,55 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 onDoubleTap: item.type == EditorItemType.text
                     ? () => _editText(item)
                     : null,
-                onPanStart: (_) {
+                onPanStart: (details) {
                   if (_drawingMode) return;
                   _commit();
+                  if (selected && _activeGizmoMode == 'rotate') {
+                    final center = _itemGlobalCenter(item);
+                    if (center != null) {
+                      final vector = details.globalPosition - center;
+                      _rotateStartAngle = math.atan2(vector.dy, vector.dx);
+                      _rotateStartRotation = item.rotation;
+                    }
+                    return;
+                  }
                   setState(() => _selectedId = item.id);
                 },
                 onPanUpdate: (details) {
                   if (_drawingMode) return;
+                  if (selected && _activeGizmoMode == 'rotate') {
+                    final startAngle = _rotateStartAngle;
+                    final center = _itemGlobalCenter(item);
+                    if (startAngle == null || center == null) return;
+                    final vector = details.globalPosition - center;
+                    final currentAngle = math.atan2(vector.dy, vector.dx);
+                    setState(() {
+                      item.rotation =
+                          _rotateStartRotation + (currentAngle - startAngle);
+                    });
+                    return;
+                  }
+                  if (selected && _activeGizmoMode == 'resize') {
+                    setState(() {
+                      final oldWidth = item.width;
+                      final nextWidth =
+                          (item.width + details.delta.dx / pageSize.width)
+                              .clamp(0.045, 1.0 - item.x)
+                              .toDouble();
+                      final nextHeight =
+                          (item.height + details.delta.dy / pageSize.height)
+                              .clamp(0.035, 1.0 - item.y)
+                              .toDouble();
+                      item.width = nextWidth;
+                      item.height = nextHeight;
+                      if (item.type == EditorItemType.text && oldWidth > 0) {
+                        item.fontSize = (item.fontSize * nextWidth / oldWidth)
+                            .clamp(8.0, 96.0)
+                            .toDouble();
+                      }
+                    });
+                    return;
+                  }
                   setState(() {
                     item.x = (item.x + details.delta.dx / pageSize.width)
                         .clamp(0.0, 1.0 - item.width)
@@ -1579,6 +1662,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                         .toDouble();
                   });
                 },
+                onPanEnd: (_) => _rotateStartAngle = null,
+                onPanCancel: () => _rotateStartAngle = null,
                 child: DecoratedBox(
                   decoration: BoxDecoration(
                     border: selected
@@ -1605,41 +1690,21 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 child: Center(
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
-                    onPanStart: (details) {
-                      _commit();
-                      final center = _itemGlobalCenter(item);
-                      if (center != null) {
-                        final vector = details.globalPosition - center;
-                        _rotateStartAngle = math.atan2(vector.dy, vector.dx);
-                        _rotateStartRotation = item.rotation;
-                      }
-                      setState(() => _rotatingItem = true);
-                    },
-                    onPanUpdate: (details) {
-                      final startAngle = _rotateStartAngle;
-                      final center = _itemGlobalCenter(item);
-                      if (startAngle == null || center == null) return;
-                      final vector = details.globalPosition - center;
-                      final currentAngle = math.atan2(vector.dy, vector.dx);
+                    onTap: () {
                       setState(() {
-                        item.rotation =
-                            _rotateStartRotation + (currentAngle - startAngle);
+                        _activeGizmoMode = _activeGizmoMode == 'rotate'
+                            ? null
+                            : 'rotate';
                       });
-                    },
-                    onPanEnd: (_) {
-                      _rotateStartAngle = null;
-                      setState(() => _rotatingItem = false);
-                    },
-                    onPanCancel: () {
-                      _rotateStartAngle = null;
-                      setState(() => _rotatingItem = false);
                     },
                     child: Transform.scale(
                       scale: _inverseZoom,
                       child: _handle(
                         icon: Icons.rotate_right,
-                        tooltip: '좌우로 드래그하여 회전',
-                        active: _rotatingItem,
+                        tooltip: _activeGizmoMode == 'rotate'
+                            ? '회전 모드 종료'
+                            : '탭하여 회전 모드 진입 후 좌우로 드래그',
+                        active: _activeGizmoMode == 'rotate',
                       ),
                     ),
                   ),
@@ -1650,38 +1715,21 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 bottom: -25 * _inverseZoom,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onPanStart: (_) {
-                    _commit();
-                    setState(() => _resizingItem = true);
-                  },
-                  onPanUpdate: (details) {
+                  onTap: () {
                     setState(() {
-                      final oldWidth = item.width;
-                      final nextWidth =
-                          (item.width + details.delta.dx / pageSize.width)
-                              .clamp(0.045, 1.0 - item.x)
-                              .toDouble();
-                      final nextHeight =
-                          (item.height + details.delta.dy / pageSize.height)
-                              .clamp(0.035, 1.0 - item.y)
-                              .toDouble();
-                      item.width = nextWidth;
-                      item.height = nextHeight;
-                      if (item.type == EditorItemType.text && oldWidth > 0) {
-                        item.fontSize = (item.fontSize * nextWidth / oldWidth)
-                            .clamp(8.0, 96.0)
-                            .toDouble();
-                      }
+                      _activeGizmoMode = _activeGizmoMode == 'resize'
+                          ? null
+                          : 'resize';
                     });
                   },
-                  onPanEnd: (_) => setState(() => _resizingItem = false),
-                  onPanCancel: () => setState(() => _resizingItem = false),
                   child: Transform.scale(
                     scale: _inverseZoom,
                     child: _handle(
                       icon: Icons.open_in_full,
-                      tooltip: '드래그하여 크기 조절',
-                      active: _resizingItem,
+                      tooltip: _activeGizmoMode == 'resize'
+                          ? '크기 조절 모드 종료'
+                          : '탭하여 크기 조절 모드 진입 후 드래그',
+                      active: _activeGizmoMode == 'resize',
                     ),
                   ),
                 ),
@@ -1691,7 +1739,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 top: -25 * _inverseZoom,
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
-                  onTap: _deleteSelected,
+                  onTap: _confirmDeleteSelected,
                   child: Transform.scale(
                     scale: _inverseZoom,
                     child: _handle(
