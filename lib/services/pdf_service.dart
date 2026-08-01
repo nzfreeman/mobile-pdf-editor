@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart' as pdf_core;
@@ -84,7 +85,17 @@ class PdfService {
     required List<EditorItem> items,
     required String sourceName,
   }) async {
-    final document = pw.Document(compress: true);
+    // Text/memo/link items are drawn with a real font rather than the pdf
+    // package's built-in Helvetica, which has no Hangul glyphs and would
+    // render Korean labels as blank boxes.
+    final fontData = await rootBundle.load(
+      'assets/fonts/NanumGothic-Regular.ttf',
+    );
+    final font = pw.Font.ttf(fontData);
+    final document = pw.Document(
+      compress: true,
+      theme: pw.ThemeData.withFont(base: font, bold: font),
+    );
 
     for (var index = 0; index < pages.length; index++) {
       final page = pages[index];
@@ -348,6 +359,27 @@ class PdfService {
         child = pw.Container(
           color: pdf_core.PdfColor.fromInt(item.colorValue),
         );
+        break;
+      case EditorItemType.memo:
+        child = pw.Container(
+          color: pdf_core.PdfColor.fromInt(item.colorValue),
+          padding: const pw.EdgeInsets.all(4),
+          child: pw.Text(item.text ?? '', style: const pw.TextStyle(fontSize: 9)),
+        );
+        break;
+      case EditorItemType.link:
+        final url = item.linkUrl;
+        final label = pw.Text(
+          item.text ?? url ?? '',
+          style: pw.TextStyle(
+            fontSize: item.fontSize,
+            color: pdf_core.PdfColors.blue,
+            decoration: pw.TextDecoration.underline,
+          ),
+        );
+        child = url == null || url.isEmpty
+            ? label
+            : pw.UrlLink(destination: url, child: label);
         break;
       case EditorItemType.drawing:
         child = pw.CustomPaint(

@@ -2,7 +2,17 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
-enum EditorItemType { text, check, signature, image, stamp, drawing, rect }
+enum EditorItemType {
+  text,
+  check,
+  signature,
+  image,
+  stamp,
+  drawing,
+  rect,
+  memo,
+  link,
+}
 
 class DrawingPoint {
   const DrawingPoint(this.dx, this.dy);
@@ -29,6 +39,7 @@ class EditorItem {
     this.points = const [],
     this.strokeWidth = 3,
     this.colorValue = 0xFF000000,
+    this.linkUrl,
   });
 
   final String id;
@@ -46,6 +57,9 @@ class EditorItem {
   double strokeWidth;
   int colorValue;
 
+  /// Target URL for [EditorItemType.link] items.
+  String? linkUrl;
+
   EditorItem copy() => copyWith();
 
   EditorItem copyWith({
@@ -62,6 +76,7 @@ class EditorItem {
     List<DrawingPoint>? points,
     double? strokeWidth,
     int? colorValue,
+    String? linkUrl,
   }) {
     return EditorItem(
       id: id ?? this.id,
@@ -80,6 +95,7 @@ class EditorItem {
       points: points ?? List<DrawingPoint>.from(this.points),
       strokeWidth: strokeWidth ?? this.strokeWidth,
       colorValue: colorValue ?? this.colorValue,
+      linkUrl: linkUrl ?? this.linkUrl,
     );
   }
 }

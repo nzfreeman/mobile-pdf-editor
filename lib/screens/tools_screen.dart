@@ -6,6 +6,7 @@ import 'package:printing/printing.dart';
 
 import '../services/android_file_service.dart';
 import '../services/app_settings.dart';
+import '../services/docx_text_service.dart';
 import '../services/image_pdf_service.dart';
 import 'compress_pdf_screen.dart';
 import 'merge_pdf_screen.dart';
@@ -88,6 +89,35 @@ class _ToolsScreenState extends State<ToolsScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('텍스트 파일 변환 실패: $error')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _docxToPdf() async {
+    setState(() => _busy = true);
+    try {
+      final selected = await AndroidFileService.pickDocx();
+      if (selected == null) return;
+      final text = await DocxTextService.extractText(File(selected.path));
+      final pdf = await ImagePdfService.createPdfFromText(
+        text,
+        title: selected.name,
+      );
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              PdfEditorScreen(pdfFile: pdf, fileName: '${selected.name}.pdf'),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('문서 변환 실패: $error')),
+        );
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -258,6 +288,12 @@ class _ToolsScreenState extends State<ToolsScreen> {
         '텍스트 → PDF',
         Icons.description_outlined,
         _textToPdf,
+        create: true,
+      ),
+      _ToolData(
+        '문서(docx) → PDF',
+        Icons.article_outlined,
+        _docxToPdf,
         create: true,
       ),
       _ToolData(

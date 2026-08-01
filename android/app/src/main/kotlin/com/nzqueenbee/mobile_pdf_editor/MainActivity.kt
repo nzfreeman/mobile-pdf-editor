@@ -18,12 +18,14 @@ class MainActivity : FlutterActivity() {
     private val savePdfRequest = 7302
     private val pickMultiplePdfsRequest = 7303
     private val pickTextRequest = 7304
+    private val pickDocxRequest = 7305
 
     private var pendingPickResult: MethodChannel.Result? = null
     private var pendingSaveResult: MethodChannel.Result? = null
     private var pendingSavePath: String? = null
     private var pendingPickMultipleResult: MethodChannel.Result? = null
     private var pendingPickTextResult: MethodChannel.Result? = null
+    private var pendingPickDocxResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -34,6 +36,7 @@ class MainActivity : FlutterActivity() {
                     "pickMultiplePdfs" -> pickMultiplePdfs(result)
                     "savePdf" -> savePdf(call, result)
                     "pickText" -> pickText(result)
+                    "pickDocx" -> pickDocx(result)
                     else -> result.notImplemented()
                 }
             }
@@ -65,6 +68,20 @@ class MainActivity : FlutterActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivityForResult(intent, pickTextRequest)
+    }
+
+    private fun pickDocx(result: MethodChannel.Result) {
+        if (pendingPickDocxResult != null) {
+            result.error("busy", "A document picker is already open.", null)
+            return
+        }
+        pendingPickDocxResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(intent, pickDocxRequest)
     }
 
     private fun pickMultiplePdfs(result: MethodChannel.Result) {
@@ -111,9 +128,11 @@ class MainActivity : FlutterActivity() {
             savePdfRequest -> completeSave(resultCode, data?.data)
             pickMultiplePdfsRequest -> completePickMultiple(resultCode, data)
             pickTextRequest -> completePick(pendingPickTextResult, resultCode, data?.data, "selected.txt")
+            pickDocxRequest -> completePick(pendingPickDocxResult, resultCode, data?.data, "selected.docx")
         }
         if (requestCode == pickPdfRequest) pendingPickResult = null
         if (requestCode == pickTextRequest) pendingPickTextResult = null
+        if (requestCode == pickDocxRequest) pendingPickDocxResult = null
     }
 
     private fun completePick(

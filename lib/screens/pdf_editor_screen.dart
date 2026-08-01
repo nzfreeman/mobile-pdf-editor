@@ -274,14 +274,37 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   }
 
   Future<void> _editText(EditorItem item) async {
-    if (item.type != EditorItemType.text) return;
+    if (item.type != EditorItemType.text && item.type != EditorItemType.memo) {
+      return;
+    }
     final text = await _textDialog(
       initialText: item.text ?? '',
-      title: '텍스트 수정',
+      title: item.type == EditorItemType.memo ? '메모 수정' : '텍스트 수정',
     );
     if (text == null || text == item.text) return;
     _commit();
     setState(() => item.text = text);
+  }
+
+  Future<void> _editLink(EditorItem item) async {
+    if (item.type != EditorItemType.link) return;
+    final label = await _textDialog(
+      initialText: item.text ?? '',
+      title: '링크 표시 텍스트',
+      maxLines: 1,
+    );
+    if (label == null) return;
+    final url = await _textDialog(
+      initialText: item.linkUrl ?? '',
+      title: '링크 URL',
+      maxLines: 1,
+    );
+    if (url == null || url.isEmpty) return;
+    _commit();
+    setState(() {
+      item.text = label.isEmpty ? url : label;
+      item.linkUrl = url;
+    });
   }
 
   Future<List<PdfTextRun>> _extractRunsForCurrentPage() async {
@@ -589,6 +612,51 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         ..add(mask)
         ..add(replacement);
       _selectedId = replacement.id;
+      _drawingMode = false;
+    });
+  }
+
+  void _addMemo() {
+    _commit();
+    setState(() {
+      final item = EditorItem(
+        id: _uuid.v4(),
+        type: EditorItemType.memo,
+        pageIndex: _pageIndex,
+        x: 0.2,
+        y: 0.25,
+        width: 0.3,
+        height: 0.15,
+        text: '메모를 입력하세요',
+        colorValue: 0xFFFFF59D,
+      );
+      _items.add(item);
+      _selectedId = item.id;
+      _drawingMode = false;
+    });
+  }
+
+  Future<void> _addLink() async {
+    final label = await _textDialog(title: '링크 표시 텍스트', maxLines: 1);
+    if (label == null || !mounted) return;
+    final url = await _textDialog(title: '링크 URL (https://...)', maxLines: 1);
+    if (url == null || url.isEmpty) return;
+    _commit();
+    setState(() {
+      final item = EditorItem(
+        id: _uuid.v4(),
+        type: EditorItemType.link,
+        pageIndex: _pageIndex,
+        x: 0.15,
+        y: 0.2,
+        width: 0.4,
+        height: 0.06,
+        text: label.isEmpty ? url : label,
+        linkUrl: url,
+        fontSize: 16,
+      );
+      _items.add(item);
+      _selectedId = item.id;
       _drawingMode = false;
     });
   }
@@ -1289,12 +1357,34 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                       label: '복제',
                       onTap: _duplicateSelected,
                     ),
-                    if (selected.type == EditorItemType.text)
+                    if (selected.type == EditorItemType.text ||
+                        selected.type == EditorItemType.memo)
                       _toolbarAction(
                         icon: Icons.edit,
                         label: '수정',
                         onTap: () => _editText(selected),
                       ),
+                    if (selected.type == EditorItemType.link) ...[
+                      _toolbarAction(
+                        icon: Icons.edit,
+                        label: '수정',
+                        onTap: () => _editLink(selected),
+                      ),
+                      _toolbarAction(
+                        icon: Icons.open_in_new,
+                        label: '열기',
+                        onTap: () => _openLink(
+                          PdfLinkAnnotation(
+                            pageIndex: selected.pageIndex,
+                            rectX: 0,
+                            rectY: 0,
+                            rectWidth: 0,
+                            rectHeight: 0,
+                            uri: selected.linkUrl,
+                          ),
+                        ),
+                      ),
+                    ],
                     _toolbarAction(
                       icon: Icons.delete_outline,
                       label: '삭제',
@@ -1468,6 +1558,22 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
               onTap: () {
                 Navigator.pop(sheetContext);
                 _addShape();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.sticky_note_2_outlined),
+              title: const Text('메모 추가'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _addMemo();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.link),
+              title: const Text('링크 추가'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _addLink();
               },
             ),
             ListTile(
@@ -1746,6 +1852,27 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       );
     } else if (item.type == EditorItemType.rect) {
       content = ColoredBox(color: Color(item.colorValue));
+    } else if (item.type == EditorItemType.memo) {
+      content = Container(
+        color: Color(item.colorValue),
+        padding: const EdgeInsets.all(6),
+        child: Text(
+          item.text ?? '',
+          style: const TextStyle(fontSize: 12, color: Colors.black87),
+        ),
+      );
+    } else if (item.type == EditorItemType.link) {
+      content = Align(
+        alignment: Alignment.topLeft,
+        child: Text(
+          item.text ?? item.linkUrl ?? '',
+          style: TextStyle(
+            fontSize: item.fontSize,
+            color: Colors.blue,
+            decoration: TextDecoration.underline,
+          ),
+        ),
+      );
     } else {
       content = item.bytes == null
           ? const SizedBox()
@@ -1778,9 +1905,12 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                     }
                   }
                 },
-                onDoubleTap: item.type == EditorItemType.text
-                    ? () => _editText(item)
-                    : null,
+                onDoubleTap: switch (item.type) {
+                  EditorItemType.text ||
+                  EditorItemType.memo => () => _editText(item),
+                  EditorItemType.link => () => _editLink(item),
+                  _ => null,
+                },
                 onPanStart: (details) {
                   if (_drawingMode) return;
                   _commit();
