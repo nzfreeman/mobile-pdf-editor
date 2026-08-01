@@ -1724,8 +1724,13 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 boundaryMargin: const EdgeInsets.all(300),
                 minScale: 1,
                 maxScale: 6,
-                panEnabled: !_drawingMode,
-                scaleEnabled: !_drawingMode,
+                // Panning must be off while an item is selected — otherwise
+                // dragging the item to move/rotate/resize it also drags the
+                // InteractiveViewer underneath it, since both gesture
+                // detectors sit in the same hit-test chain and Flutter
+                // recognizes pan gestures on both simultaneously.
+                panEnabled: !_drawingMode && _selectedId == null,
+                scaleEnabled: !_drawingMode && _selectedId == null,
                 onInteractionUpdate: (_) {
                   final scale = _transformController.value.getMaxScaleOnAxis();
                   if ((scale - _zoomScale).abs() > 0.02) {

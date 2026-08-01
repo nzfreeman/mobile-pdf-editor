@@ -93,6 +93,41 @@ void main() {
     },
   );
 
+  test(
+    'a replacement only slightly wider than the original is condensed to '
+    'fit the original footprint instead of overflowing into whatever the '
+    'page draws next on that line (e.g. an adjacent table cell)',
+    () {
+      final pdfBytes = _buildSimpleFontPdf(originalText: '345,678');
+      final doc = PdfDocument.parse(pdfBytes);
+      final run = extractTextRuns(doc, doc.pages.single).single;
+
+      final replacementOp = buildReplacementOperatorBytes(run, '345,7689');
+      final edited = applyIncrementalEdits(doc, pdfBytes, [
+        PdfEdit(
+          streamRef: run.contentStreamRef,
+          start: run.byteStartInStream,
+          end: run.byteEndInStream,
+          replacement: replacementOp,
+        ),
+      ]);
+
+      final reparsed = PdfDocument.parse(edited);
+      final newRuns = extractTextRuns(reparsed, reparsed.pages.single);
+      expect(
+        newRuns,
+        hasLength(1),
+        reason: 'a one-character-longer replacement should not wrap to a second line',
+      );
+      expect(newRuns.single.text, '345,7689');
+      expect(
+        newRuns.single.horizScalePercent,
+        lessThan(100),
+        reason: 'the extra character should be fit via horizontal compression',
+      );
+    },
+  );
+
   test('a replacement no longer than the original stays on one line', () {
     final pdfBytes = _buildSimpleFontPdf(originalText: 'Hello');
     final doc = PdfDocument.parse(pdfBytes);

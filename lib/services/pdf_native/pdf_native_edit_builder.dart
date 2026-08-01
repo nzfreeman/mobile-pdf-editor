@@ -72,7 +72,7 @@ Uint8List buildReplacementOperatorBytes(
   // held a single short code, say).
   final wrapWidth = math.max(originalWidth, run.fontSize * 15);
 
-  double measureLine(String line) {
+  double measureLineAtScale(String line, double horizScalePercent) {
     var total = 0.0;
     for (final rune in line.runes) {
       total += widthOf(String.fromCharCode(rune));
@@ -80,10 +80,40 @@ Uint8List buildReplacementOperatorBytes(
     final glyphWidth = total / unitsPerEm * run.fontSize;
     final spaceCount = ' '.allMatches(line).length;
     final spacingWidth = run.charSpacing * line.length + run.wordSpacing * spaceCount;
-    return (glyphWidth + spacingWidth) * (run.horizScalePercent / 100);
+    return (glyphWidth + spacingWidth) * (horizScalePercent / 100);
   }
 
-  final lines = _wrapLines(newText, wrapWidth, measureLine);
+  double measureLine(String line) =>
+      measureLineAtScale(line, run.horizScalePercent);
+
+  // A same-line replacement that's only modestly wider than the original
+  // (e.g. one extra digit in a number) is squeezed horizontally to still
+  // fit within the original footprint, rather than growing past it —
+  // growing risks overlapping whatever else the page draws immediately
+  // to the right on the same line (a neighboring table cell, another
+  // field, ...), since replacing this run's operator doesn't move
+  // anything else already positioned on the page. Only when even
+  // aggressive compression wouldn't be legible does this fall back to
+  // wrapping across lines instead.
+  const minCondensedScalePercent = 55.0;
+  var effectiveHorizScalePercent = run.horizScalePercent;
+  final singleLineText = newText.replaceAll('\n', ' ');
+  if (!newText.contains('\n')) {
+    final naturalWidth = measureLine(singleLineText);
+    if (naturalWidth > originalWidth && originalWidth > 0) {
+      final requiredScale =
+          run.horizScalePercent * (originalWidth / naturalWidth);
+      if (requiredScale >= minCondensedScalePercent) {
+        effectiveHorizScalePercent = requiredScale;
+      }
+    }
+  }
+  double measureLineEffective(String line) =>
+      measureLineAtScale(line, effectiveHorizScalePercent);
+
+  final lines = effectiveHorizScalePercent != run.horizScalePercent
+      ? [singleLineText]
+      : _wrapLines(newText, wrapWidth, measureLine);
   final encodedLines = <Uint8List>[];
   for (final line in lines) {
     final encoded = encodeLine(line);
@@ -103,7 +133,7 @@ Uint8List buildReplacementOperatorBytes(
   final descent = run.fontSize * 0.25;
   final ascent = run.fontSize * 0.9;
   final lineHeight = run.fontSize * 1.15;
-  final lineWidths = lines.map(measureLine).toList();
+  final lineWidths = lines.map(measureLineEffective).toList();
   final maxLineWidth = lineWidths.isEmpty
       ? wrapWidth
       : lineWidths.reduce(math.max);
@@ -133,7 +163,7 @@ Uint8List buildReplacementOperatorBytes(
     // labels/headers).
     ..writeln('${_fmt(run.charSpacing)} Tc')
     ..writeln('${_fmt(run.wordSpacing)} Tw')
-    ..writeln('${_fmt(run.horizScalePercent)} Tz')
+    ..writeln('${_fmt(effectiveHorizScalePercent)} Tz')
     ..writeln('${_fmt(run.originX)} ${_fmt(run.originY)} Td');
 
   final out = BytesBuilder();
