@@ -112,6 +112,14 @@ class PdfService {
               pw.Positioned.fill(
                 child: pw.Image(background, fit: pw.BoxFit.fill),
               ),
+              pw.Positioned(
+                left: 0,
+                top: 0,
+                child: pw.Anchor(
+                  name: _internalLinkAnchorName(index),
+                  child: pw.SizedBox(width: 1, height: 1),
+                ),
+              ),
               ...pageItems.map(
                 (item) => _buildPdfItem(item, page.width, page.height),
               ),
@@ -369,6 +377,7 @@ class PdfService {
         break;
       case EditorItemType.link:
         final url = item.linkUrl;
+        final targetPage = item.linkTargetPage;
         final label = pw.Text(
           item.text ?? url ?? '',
           style: pw.TextStyle(
@@ -377,9 +386,16 @@ class PdfService {
             decoration: pw.TextDecoration.underline,
           ),
         );
-        child = url == null || url.isEmpty
-            ? label
-            : pw.UrlLink(destination: url, child: label);
+        if (targetPage != null) {
+          child = pw.Link(
+            destination: _internalLinkAnchorName(targetPage),
+            child: label,
+          );
+        } else if (url != null && url.isNotEmpty) {
+          child = pw.UrlLink(destination: url, child: label);
+        } else {
+          child = label;
+        }
         break;
       case EditorItemType.drawing:
         child = pw.CustomPaint(
@@ -417,3 +433,8 @@ class PdfService {
     );
   }
 }
+
+/// Name shared between the [pw.Anchor] placed on every exported page and
+/// any [pw.Link] targeting it by page index — must match exactly since
+/// pdf's internal-link resolution is a plain string lookup.
+String _internalLinkAnchorName(int pageIndex) => 'page_$pageIndex';

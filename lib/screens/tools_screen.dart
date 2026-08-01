@@ -6,7 +6,7 @@ import 'package:printing/printing.dart';
 
 import '../services/android_file_service.dart';
 import '../services/app_settings.dart';
-import '../services/docx_text_service.dart';
+import '../services/docx_service.dart';
 import '../services/image_pdf_service.dart';
 import 'compress_pdf_screen.dart';
 import 'merge_pdf_screen.dart';
@@ -100,9 +100,9 @@ class _ToolsScreenState extends State<ToolsScreen> {
     try {
       final selected = await AndroidFileService.pickDocx();
       if (selected == null) return;
-      final text = await DocxTextService.extractText(File(selected.path));
-      final pdf = await ImagePdfService.createPdfFromText(
-        text,
+      final blocks = await DocxService.parse(File(selected.path));
+      final pdf = await ImagePdfService.createPdfFromDocxBlocks(
+        blocks,
         title: selected.name,
       );
       if (!mounted) return;

@@ -286,24 +286,85 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     setState(() => item.text = text);
   }
 
+  /// null = cancelled, true = internal page-jump link, false = external URL.
+  Future<bool?> _askLinkType() {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('링크 종류 선택'),
+        content: const Text('외부 웹사이트로 연결할지, 이 문서의 다른 페이지로 이동할지 선택하세요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, null),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('문서 내 페이지'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('외부 URL'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<int?> _askPageNumber({int? initial}) async {
+    final input = await _textDialog(
+      initialText: initial == null ? '' : '${initial + 1}',
+      title: '이동할 페이지 번호 (1~${_pages.length})',
+      maxLines: 1,
+    );
+    if (input == null) return null;
+    final page = int.tryParse(input.trim());
+    if (page == null || page < 1 || page > _pages.length) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('1~${_pages.length} 사이의 페이지 번호를 입력하세요.')),
+        );
+      }
+      return null;
+    }
+    return page - 1;
+  }
+
   Future<void> _editLink(EditorItem item) async {
     if (item.type != EditorItemType.link) return;
+    final isInternal = await _askLinkType();
+    if (isInternal == null || !mounted) return;
+
     final label = await _textDialog(
       initialText: item.text ?? '',
       title: '링크 표시 텍스트',
       maxLines: 1,
     );
-    if (label == null) return;
+    if (label == null || !mounted) return;
+
+    if (isInternal) {
+      final targetPage = await _askPageNumber(initial: item.linkTargetPage);
+      if (targetPage == null) return;
+      _commit();
+      setState(() {
+        item.text = label.isEmpty ? '${targetPage + 1}페이지로 이동' : label;
+        item.linkTargetPage = targetPage;
+        item.linkUrl = null;
+      });
+      return;
+    }
+
     final url = await _textDialog(
       initialText: item.linkUrl ?? '',
       title: '링크 URL',
       maxLines: 1,
     );
-    if (url == null || url.isEmpty) return;
+    if (url == null || url.isEmpty || !mounted) return;
     _commit();
     setState(() {
       item.text = label.isEmpty ? url : label;
       item.linkUrl = url;
+      item.linkTargetPage = null;
     });
   }
 
@@ -637,10 +698,27 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   }
 
   Future<void> _addLink() async {
+    final isInternal = await _askLinkType();
+    if (isInternal == null || !mounted) return;
+
     final label = await _textDialog(title: '링크 표시 텍스트', maxLines: 1);
     if (label == null || !mounted) return;
-    final url = await _textDialog(title: '링크 URL (https://...)', maxLines: 1);
-    if (url == null || url.isEmpty) return;
+
+    String text;
+    String? url;
+    int? targetPage;
+    if (isInternal) {
+      final page = await _askPageNumber();
+      if (page == null) return;
+      targetPage = page;
+      text = label.isEmpty ? '${page + 1}페이지로 이동' : label;
+    } else {
+      final input = await _textDialog(title: '링크 URL (https://...)', maxLines: 1);
+      if (input == null || input.isEmpty || !mounted) return;
+      url = input;
+      text = label.isEmpty ? input : label;
+    }
+
     _commit();
     setState(() {
       final item = EditorItem(
@@ -651,8 +729,9 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         y: 0.2,
         width: 0.4,
         height: 0.06,
-        text: label.isEmpty ? url : label,
+        text: text,
         linkUrl: url,
+        linkTargetPage: targetPage,
         fontSize: 16,
       );
       _items.add(item);
@@ -1381,6 +1460,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                             rectWidth: 0,
                             rectHeight: 0,
                             uri: selected.linkUrl,
+                            destPageIndex: selected.linkTargetPage,
                           ),
                         ),
                       ),

@@ -40,6 +40,7 @@ class EditorItem {
     this.strokeWidth = 3,
     this.colorValue = 0xFF000000,
     this.linkUrl,
+    this.linkTargetPage,
   });
 
   final String id;
@@ -57,8 +58,13 @@ class EditorItem {
   double strokeWidth;
   int colorValue;
 
-  /// Target URL for [EditorItemType.link] items.
+  /// Target URL for an external [EditorItemType.link] item. Exactly one
+  /// of [linkUrl]/[linkTargetPage] is set for a given link.
   String? linkUrl;
+
+  /// Target page index (0-based) for an internal same-document
+  /// [EditorItemType.link] item.
+  int? linkTargetPage;
 
   EditorItem copy() => copyWith();
 
@@ -77,6 +83,7 @@ class EditorItem {
     double? strokeWidth,
     int? colorValue,
     String? linkUrl,
+    int? linkTargetPage,
   }) {
     return EditorItem(
       id: id ?? this.id,
@@ -96,6 +103,7 @@ class EditorItem {
       strokeWidth: strokeWidth ?? this.strokeWidth,
       colorValue: colorValue ?? this.colorValue,
       linkUrl: linkUrl ?? this.linkUrl,
+      linkTargetPage: linkTargetPage ?? this.linkTargetPage,
     );
   }
 }
