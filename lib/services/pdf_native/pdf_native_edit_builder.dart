@@ -32,6 +32,17 @@ Uint8List buildReplacementOperatorBytes(
   PdfTextRun run,
   String newText, {
   EmbeddedCidFont? fallbackFont,
+  /// Real available horizontal room before the closest other content on
+  /// the same line (see [PdfNativeTextService.replaceRunText]), used
+  /// instead of the original run's own width when deciding how much
+  /// compression/wrapping a longer replacement needs. Falls back to the
+  /// original run's footprint when the caller can't determine this (no
+  /// other content nearby, or the page's other runs weren't available).
+  double? availableWidthOverride,
+  /// Manual horizontal nudge (page-space points, positive = right) on
+  /// top of the run's original origin — lets a user who isn't happy with
+  /// the automatic fit shift the replacement themselves.
+  double manualOffsetX = 0,
 }) {
   double Function(String) widthOf = run.font.widthOf;
   double unitsPerEm = run.font.unitsPerEm;
@@ -66,11 +77,14 @@ Uint8List buildReplacementOperatorBytes(
 
   final originalWidth =
       run.font.measureWidth(run.text) / run.font.unitsPerEm * run.fontSize;
-  // Wrap to roughly the same footprint the original text occupied so a
+  // The target footprint for fitting the replacement: real available
+  // room before the next content on the line when known, otherwise the
+  // original run's own width. Wrap to roughly this same footprint so a
   // longer replacement doesn't run off the page — but never so narrow
   // that even short replacements wrap absurdly (a field that originally
   // held a single short code, say).
-  final wrapWidth = math.max(originalWidth, run.fontSize * 15);
+  final fitWidth = availableWidthOverride ?? originalWidth;
+  final wrapWidth = math.max(fitWidth, run.fontSize * 15);
 
   double measureLineAtScale(String line, double horizScalePercent) {
     var total = 0.0;
@@ -100,9 +114,8 @@ Uint8List buildReplacementOperatorBytes(
   final singleLineText = newText.replaceAll('\n', ' ');
   if (!newText.contains('\n')) {
     final naturalWidth = measureLine(singleLineText);
-    if (naturalWidth > originalWidth && originalWidth > 0) {
-      final requiredScale =
-          run.horizScalePercent * (originalWidth / naturalWidth);
+    if (naturalWidth > fitWidth && fitWidth > 0) {
+      final requiredScale = run.horizScalePercent * (fitWidth / naturalWidth);
       if (requiredScale >= minCondensedScalePercent) {
         effectiveHorizScalePercent = requiredScale;
       }
@@ -138,9 +151,18 @@ Uint8List buildReplacementOperatorBytes(
       ? wrapWidth
       : lineWidths.reduce(math.max);
 
-  final rectX = run.originX;
+  final newOriginX = run.originX + manualOffsetX;
+  // The mask must cover both the original glyphs (so they don't show
+  // through) and wherever the new text actually lands — which can differ
+  // from the original origin once [manualOffsetX] shifts it.
+  final maskLeft = math.min(run.originX, newOriginX);
+  final maskRight = math.max(
+    run.originX + originalWidth,
+    newOriginX + maxLineWidth,
+  );
+  final rectX = maskLeft;
   final rectY = run.originY - descent - lineHeight * (lines.length - 1);
-  final rectWidth = maxLineWidth <= 0 ? run.fontSize : maxLineWidth;
+  final rectWidth = math.max(maskRight - maskLeft, run.fontSize);
   final rectHeight = descent + ascent + lineHeight * (lines.length - 1);
 
   final buffer = StringBuffer()
@@ -164,7 +186,7 @@ Uint8List buildReplacementOperatorBytes(
     ..writeln('${_fmt(run.charSpacing)} Tc')
     ..writeln('${_fmt(run.wordSpacing)} Tw')
     ..writeln('${_fmt(effectiveHorizScalePercent)} Tz')
-    ..writeln('${_fmt(run.originX)} ${_fmt(run.originY)} Td');
+    ..writeln('${_fmt(newOriginX)} ${_fmt(run.originY)} Td');
 
   final out = BytesBuilder();
   out.add(buffer.toString().codeUnits);

@@ -521,13 +521,35 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     final newText = await _textDialog(initialText: run.text, title: '텍스트 수정');
     if (newText == null || newText.isEmpty || newText == run.text) return;
 
+    // Every re-application (initial + manual nudges) is applied fresh
+    // against the file as it was *before* this edit — replaceRunText
+    // locates the run by its original byte offsets, which stop being
+    // valid the moment that content stream is rewritten once.
+    final baseFile = _currentFile;
+    var offsetX = 0.0;
+    final applied = await _applyRunReplacement(run, newText, baseFile, offsetX);
+    if (applied == null || !mounted) return;
+
+    await _adjustRunPositionSheet(run, newText, baseFile, offsetX);
+  }
+
+  /// Runs [PdfNativeTextService.replaceRunText] and folds in the shared
+  /// success/failure handling (snackbars, OCR fallback, page reload) used
+  /// by both the initial edit and any manual position nudges.
+  Future<({bool usedFallbackFont})?> _applyRunReplacement(
+    PdfTextRun run,
+    String newText,
+    File baseFile,
+    double offsetX,
+  ) async {
     setState(() => _recognizing = true);
     try {
       final result = await PdfNativeTextService.replaceRunText(
-        file: _currentFile,
+        file: baseFile,
         pageIndex: _pageIndex,
         run: run,
         newText: newText,
+        manualOffsetX: offsetX,
       );
       _currentFile = result.file;
       _hasNativeTextEdits = true;
@@ -548,6 +570,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
           ),
         );
       }
+      return (usedFallbackFont: result.usedFallbackFont);
     } on PdfRunNotEditableException {
       // Neither the original font nor the bundled fallback font can
       // represent this text (a genuine rarity) — fall back to the OCR
@@ -562,16 +585,78 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       }
       setState(() => _textEditTapMode = false);
       await _recognizeExistingText();
-      return;
+      return null;
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('텍스트 수정 실패: $error')));
       }
+      return null;
     } finally {
       if (mounted) setState(() => _recognizing = false);
     }
+  }
+
+  /// Follow-up bottom sheet offering a manual left/right nudge on top of
+  /// the automatic fit — each tap re-applies the edit from [baseFile] so
+  /// nudges don't stack on top of a moving target. Returns the final
+  /// offset applied (0 if the user made no changes).
+  Future<double?> _adjustRunPositionSheet(
+    PdfTextRun run,
+    String newText,
+    File baseFile,
+    double initialOffsetX,
+  ) async {
+    var offsetX = initialOffsetX;
+    const step = 2.0;
+    return showModalBottomSheet<double>(
+      context: context,
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          Future<void> nudge(double delta) async {
+            offsetX += delta;
+            setSheetState(() {});
+            await _applyRunReplacement(run, newText, baseFile, offsetX);
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    '자동으로 맞춘 위치가 마음에 들지 않으면 좌우로 미세 조정할 수 있습니다.',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton.filledTonal(
+                        onPressed: () => nudge(-step),
+                        icon: const Icon(Icons.chevron_left),
+                      ),
+                      const SizedBox(width: 16),
+                      IconButton.filledTonal(
+                        onPressed: () => nudge(step),
+                        icon: const Icon(Icons.chevron_right),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(sheetContext, offsetX),
+                    child: const Text('완료'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _recognizeExistingText() async {

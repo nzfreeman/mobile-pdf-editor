@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -67,6 +68,7 @@ class PdfNativeTextService {
     required int pageIndex,
     required PdfTextRun run,
     required String newText,
+    double manualOffsetX = 0,
   }) async {
     final bytes = await file.readAsBytes();
     final doc = PdfDocument.parse(bytes);
@@ -76,11 +78,21 @@ class PdfNativeTextService {
     }
     final page = pages[pageIndex];
 
+    final availableWidthOverride = _availableWidthOnLine(
+      run,
+      extractTextRuns(doc, page),
+    );
+
     final writes = <PdfObjectWrite>[];
     final Uint8List replacementBytes;
     final usedFallbackFont = run.font.encode(newText) == null;
     if (!usedFallbackFont) {
-      replacementBytes = buildReplacementOperatorBytes(run, newText);
+      replacementBytes = buildReplacementOperatorBytes(
+        run,
+        newText,
+        availableWidthOverride: availableWidthOverride,
+        manualOffsetX: manualOffsetX,
+      );
     } else {
       final ttf = await _loadFallbackTtf();
       var embedded = findExistingEmbeddedFont(doc, page, ttf);
@@ -98,6 +110,8 @@ class PdfNativeTextService {
         run,
         newText,
         fallbackFont: embedded,
+        availableWidthOverride: availableWidthOverride,
+        manualOffsetX: manualOffsetX,
       );
     }
 
@@ -120,6 +134,32 @@ class PdfNativeTextService {
     );
     await output.writeAsBytes(newBytes, flush: true);
     return (file: output, usedFallbackFont: usedFallbackFont);
+  }
+
+  /// Distance from [run]'s origin to the closest other run positioned to
+  /// its right on (roughly) the same line, or null when there's no such
+  /// neighbor (nothing else on the line, or it's the last thing on it) —
+  /// callers should fall back to the run's own width in that case. "Same
+  /// line" is a loose vertical-center match rather than exact baseline
+  /// equality, since runs can carry slightly different font sizes.
+  static double? _availableWidthOnLine(PdfTextRun run, List<PdfTextRun> pageRuns) {
+    final lineTolerance = math.max(run.fontSize, 4) * 0.6;
+    double? closestGap;
+    for (final other in pageRuns) {
+      final isSameRun =
+          other.contentStreamRef == run.contentStreamRef &&
+          other.byteStartInStream == run.byteStartInStream &&
+          other.byteEndInStream == run.byteEndInStream;
+      if (isSameRun) continue;
+      if (other.originX <= run.originX) continue;
+      if ((other.originY - run.originY).abs() > lineTolerance) continue;
+      final gap = other.originX - run.originX;
+      if (closestGap == null || gap < closestGap) closestGap = gap;
+    }
+    // Leave a small buffer so the replacement doesn't butt directly
+    // against the neighboring content.
+    if (closestGap == null) return null;
+    return math.max(closestGap - run.fontSize * 0.3, run.fontSize * 0.5);
   }
 
   static String _uniqueFontResourceName(PdfDocument doc, PdfDictionaryObj page) {
