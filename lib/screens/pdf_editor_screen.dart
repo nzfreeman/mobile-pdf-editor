@@ -593,6 +593,25 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     });
   }
 
+  void _addShape() {
+    _commit();
+    setState(() {
+      final item = EditorItem(
+        id: _uuid.v4(),
+        type: EditorItemType.rect,
+        pageIndex: _pageIndex,
+        x: 0.2,
+        y: 0.25,
+        width: 0.25,
+        height: 0.15,
+        colorValue: 0x80FFEB3B,
+      );
+      _items.add(item);
+      _selectedId = item.id;
+      _drawingMode = false;
+    });
+  }
+
   void _addCheck() {
     _commit();
     setState(() {
@@ -1441,6 +1460,14 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
               onTap: () {
                 Navigator.pop(sheetContext);
                 _pickImage(EditorItemType.stamp);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.crop_square),
+              title: const Text('도형 추가'),
+              onTap: () {
+                Navigator.pop(sheetContext);
+                _addShape();
               },
             ),
             ListTile(

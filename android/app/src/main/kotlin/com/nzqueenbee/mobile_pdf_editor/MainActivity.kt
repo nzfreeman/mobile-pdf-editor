@@ -17,11 +17,13 @@ class MainActivity : FlutterActivity() {
     private val pickPdfRequest = 7301
     private val savePdfRequest = 7302
     private val pickMultiplePdfsRequest = 7303
+    private val pickTextRequest = 7304
 
     private var pendingPickResult: MethodChannel.Result? = null
     private var pendingSaveResult: MethodChannel.Result? = null
     private var pendingSavePath: String? = null
     private var pendingPickMultipleResult: MethodChannel.Result? = null
+    private var pendingPickTextResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -31,6 +33,7 @@ class MainActivity : FlutterActivity() {
                     "pickPdf" -> pickPdf(result)
                     "pickMultiplePdfs" -> pickMultiplePdfs(result)
                     "savePdf" -> savePdf(call, result)
+                    "pickText" -> pickText(result)
                     else -> result.notImplemented()
                 }
             }
@@ -48,6 +51,20 @@ class MainActivity : FlutterActivity() {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         startActivityForResult(intent, pickPdfRequest)
+    }
+
+    private fun pickText(result: MethodChannel.Result) {
+        if (pendingPickTextResult != null) {
+            result.error("busy", "A text file picker is already open.", null)
+            return
+        }
+        pendingPickTextResult = result
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "text/plain"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivityForResult(intent, pickTextRequest)
     }
 
     private fun pickMultiplePdfs(result: MethodChannel.Result) {
@@ -90,24 +107,31 @@ class MainActivity : FlutterActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         when (requestCode) {
-            pickPdfRequest -> completePick(resultCode, data?.data)
+            pickPdfRequest -> completePick(pendingPickResult, resultCode, data?.data, "selected.pdf")
             savePdfRequest -> completeSave(resultCode, data?.data)
             pickMultiplePdfsRequest -> completePickMultiple(resultCode, data)
+            pickTextRequest -> completePick(pendingPickTextResult, resultCode, data?.data, "selected.txt")
         }
+        if (requestCode == pickPdfRequest) pendingPickResult = null
+        if (requestCode == pickTextRequest) pendingPickTextResult = null
     }
 
-    private fun completePick(resultCode: Int, uri: Uri?) {
-        val result = pendingPickResult ?: return
-        pendingPickResult = null
+    private fun completePick(
+        pendingResult: MethodChannel.Result?,
+        resultCode: Int,
+        uri: Uri?,
+        defaultName: String,
+    ) {
+        val result = pendingResult ?: return
         if (resultCode != Activity.RESULT_OK || uri == null) {
             result.success(null)
             return
         }
         try {
-            val displayName = queryDisplayName(uri) ?: "selected.pdf"
+            val displayName = queryDisplayName(uri) ?: defaultName
             val target = File(cacheDir, "picked_${System.currentTimeMillis()}_${sanitizeFileName(displayName)}")
             contentResolver.openInputStream(uri).use { input ->
-                if (input == null) throw IllegalStateException("Unable to open selected PDF.")
+                if (input == null) throw IllegalStateException("Unable to open selected file.")
                 target.outputStream().use { output -> input.copyTo(output) }
             }
             result.success(mapOf("path" to target.absolutePath, "name" to displayName))

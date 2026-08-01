@@ -285,53 +285,57 @@ class _HomeScreenState extends State<HomeScreen> {
           ListView(
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 32),
             children: [
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(22),
-                  child: Column(
-                    children: [
-                      Icon(
-                        Icons.picture_as_pdf,
-                        size: 74,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        'PDF 읽기 및 편집',
-                        style: Theme.of(context).textTheme.headlineSmall
-                            ?.copyWith(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        '텍스트 · 자유 필기 · 서명 · 이미지 · 페이지 관리',
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 20),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _busy ? null : _pickLocal,
-                          icon: const Icon(Icons.folder_open),
-                          label: const Text('PDF 열기'),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () => Navigator.push(
+              GridView.count(
+                crossAxisCount: 2,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.5,
+                children: [
+                  _HomeCategoryTile(
+                    icon: Icons.add_box_outlined,
+                    label: '새로 만들기',
+                    subtitle: '이미지·텍스트·스캔 → PDF',
+                    onTap: _busy
+                        ? null
+                        : () => Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const ToolsScreen(),
+                              builder: (_) => const ToolsScreen(
+                                initialCategory: ToolsCategory.create,
+                              ),
                             ),
                           ),
-                          icon: const Icon(Icons.grid_view_rounded),
-                          label: const Text('PDF 도구'),
-                        ),
-                      ),
-                    ],
                   ),
-                ),
+                  _HomeCategoryTile(
+                    icon: Icons.folder_open,
+                    label: '불러오기',
+                    subtitle: '기기에서 PDF 열기',
+                    onTap: _busy ? null : _pickLocal,
+                  ),
+                  _HomeCategoryTile(
+                    icon: Icons.edit_document,
+                    label: '편집하기',
+                    subtitle: '텍스트·삽입·되돌리기',
+                    onTap: _busy
+                        ? null
+                        : () async {
+                            final selected = await AndroidFileService.pickPdf();
+                            if (selected == null || !mounted) return;
+                            await _open(File(selected.path), selected.name);
+                          },
+                  ),
+                  _HomeCategoryTile(
+                    icon: Icons.grid_view_rounded,
+                    label: '문서 도구',
+                    subtitle: '분할·병합·압축·OCR 등',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const ToolsScreen()),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 22),
               Row(
@@ -399,6 +403,55 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _HomeCategoryTile extends StatelessWidget {
+  const _HomeCategoryTile({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final String subtitle;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      elevation: 0,
+      color: scheme.surfaceContainerHigh,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 28, color: scheme.primary),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodySmall,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

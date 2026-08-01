@@ -40,6 +40,28 @@ class _OrganizePdfScreenState extends State<OrganizePdfScreen> {
     }
   }
 
+  Future<void> _insertPagesFromAnotherPdf() async {
+    setState(() => _saving = true);
+    try {
+      final selected = await AndroidFileService.pickPdf();
+      if (selected == null) return;
+      final inserted = await PdfService.renderAllPages(File(selected.path));
+      if (!mounted) return;
+      setState(() => _pages.addAll(inserted));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${inserted.length}페이지를 끝에 추가했습니다. 드래그로 순서를 조정하세요.')),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('페이지 삽입 실패: $error')));
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
   void _delete(int index) {
     if (_pages.length <= 1) {
       ScaffoldMessenger.of(
@@ -100,6 +122,11 @@ class _OrganizePdfScreenState extends State<OrganizePdfScreen> {
       appBar: AppBar(
         title: const Text('페이지 구성'),
         actions: [
+          IconButton(
+            onPressed: _saving ? null : _insertPagesFromAnotherPdf,
+            icon: const Icon(Icons.post_add),
+            tooltip: '다른 PDF에서 페이지 삽입',
+          ),
           IconButton(
             onPressed: _saving || _pages.isEmpty ? null : _save,
             icon: const Icon(Icons.save_outlined),

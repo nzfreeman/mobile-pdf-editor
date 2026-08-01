@@ -21,6 +21,15 @@ class AndroidFileService {
     return SelectedPdfFile(path: path, name: name);
   }
 
+  static Future<SelectedPdfFile?> pickText() async {
+    final result = await _channel.invokeMapMethod<String, String>('pickText');
+    if (result == null) return null;
+    final path = result['path'];
+    final name = result['name'];
+    if (path == null || name == null) return null;
+    return SelectedPdfFile(path: path, name: name);
+  }
+
   static Future<List<SelectedPdfFile>> pickMultiplePdfs() async {
     final result = await _channel.invokeListMethod<Map<Object?, Object?>>(
       'pickMultiplePdfs',

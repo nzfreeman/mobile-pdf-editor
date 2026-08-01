@@ -17,8 +17,12 @@ import 'perspective_crop_screen.dart';
 import 'watermark_screen.dart';
 import 'split_pdf_screen.dart';
 
+enum ToolsCategory { all, create }
+
 class ToolsScreen extends StatefulWidget {
-  const ToolsScreen({super.key});
+  const ToolsScreen({super.key, this.initialCategory = ToolsCategory.all});
+
+  final ToolsCategory initialCategory;
 
   @override
   State<ToolsScreen> createState() => _ToolsScreenState();
@@ -56,6 +60,35 @@ class _ToolsScreenState extends State<ToolsScreen> {
           builder: (_) => PdfEditorScreen(pdfFile: pdf, fileName: 'images.pdf'),
         ),
       );
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _textToPdf() async {
+    setState(() => _busy = true);
+    try {
+      final selected = await AndroidFileService.pickText();
+      if (selected == null) return;
+      final content = await File(selected.path).readAsString();
+      final pdf = await ImagePdfService.createPdfFromText(
+        content,
+        title: selected.name,
+      );
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              PdfEditorScreen(pdfFile: pdf, fileName: '${selected.name}.pdf'),
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('텍스트 파일 변환 실패: $error')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -210,11 +243,29 @@ class _ToolsScreenState extends State<ToolsScreen> {
     ).showSnackBar(SnackBar(content: Text('$name 기능은 다음 단계에서 추가됩니다.')));
   }
 
+  late ToolsCategory _category = widget.initialCategory;
+
   @override
   Widget build(BuildContext context) {
-    final tools = <_ToolData>[
-      _ToolData('이미지 → PDF', Icons.photo_library_outlined, _imageToPdf),
-      _ToolData('문서 스캔', Icons.document_scanner_outlined, _scanToPdf),
+    final allTools = <_ToolData>[
+      _ToolData(
+        '이미지 → PDF',
+        Icons.photo_library_outlined,
+        _imageToPdf,
+        create: true,
+      ),
+      _ToolData(
+        '텍스트 → PDF',
+        Icons.description_outlined,
+        _textToPdf,
+        create: true,
+      ),
+      _ToolData(
+        '문서 스캔',
+        Icons.document_scanner_outlined,
+        _scanToPdf,
+        create: true,
+      ),
       _ToolData('페이지 구성', Icons.grid_view_rounded, _organize),
       _ToolData('PDF 편집', Icons.edit_document, () async {
         final selected = await _pickPdf();
@@ -245,9 +296,21 @@ class _ToolsScreenState extends State<ToolsScreen> {
       _ToolData('잠금 해제', Icons.lock_open, () => _comingSoon('잠금 해제')),
       _ToolData('OCR', Icons.text_snippet_outlined, _ocr),
     ];
+    final tools = _category == ToolsCategory.create
+        ? allTools.where((tool) => tool.create).toList()
+        : allTools;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('PDF 도구')),
+      appBar: AppBar(
+        title: Text(_category == ToolsCategory.create ? '새로 만들기' : 'PDF 도구'),
+        actions: [
+          if (_category == ToolsCategory.create)
+            TextButton(
+              onPressed: () => setState(() => _category = ToolsCategory.all),
+              child: const Text('전체 도구'),
+            ),
+        ],
+      ),
       body: Stack(
         children: [
           GridView.builder(
@@ -298,9 +361,10 @@ class _ToolsScreenState extends State<ToolsScreen> {
 }
 
 class _ToolData {
-  const _ToolData(this.title, this.icon, this.onTap);
+  const _ToolData(this.title, this.icon, this.onTap, {this.create = false});
 
   final String title;
   final IconData icon;
   final VoidCallback onTap;
+  final bool create;
 }
