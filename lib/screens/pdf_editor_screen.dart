@@ -6,12 +6,15 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:signature/signature.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/editor_item.dart';
 import '../services/android_file_service.dart';
 import '../services/ocr_service.dart';
 import '../services/pdf_native/pdf_content_stream.dart';
+import '../services/pdf_native/pdf_document.dart';
+import '../services/pdf_native/pdf_link_annotations.dart';
 import '../services/pdf_native/pdf_native_edit_builder.dart';
 import '../services/pdf_native/pdf_native_text_service.dart';
 import '../services/pdf_service.dart';
@@ -69,6 +72,13 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   /// directly (small drag targets on a floating circle were fiddly;
   /// this also matches how most mobile editors handle this).
   String? _activeGizmoMode;
+
+  /// Whether tapping on the page should hit-test the PDF's own text runs
+  /// for direct in-place editing, instead of the toolbar action opening a
+  /// flat list of every text run on the page up front.
+  bool _textEditTapMode = false;
+  List<PdfTextRun> _textEditRunsOnPage = [];
+  List<PdfLinkAnnotation> _links = [];
   bool _recognizing = false;
   late File _currentFile = widget.pdfFile;
   bool _hasNativeTextEdits = false;
@@ -125,6 +135,23 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+    await _loadLinks();
+  }
+
+  /// Best-effort: link annotations are a nice-to-have overlay on top of
+  /// the rendered page image, not a core editing feature, so any parse
+  /// failure (encrypted PDF, unsupported filter, etc.) just means no
+  /// clickable links rather than blocking the page from loading at all.
+  Future<void> _loadLinks() async {
+    List<PdfLinkAnnotation> links = [];
+    try {
+      final bytes = await _currentFile.readAsBytes();
+      final doc = PdfDocument.parse(bytes);
+      links = extractLinkAnnotations(doc);
+    } catch (_) {
+      links = [];
+    }
+    if (mounted) setState(() => _links = links);
   }
 
   List<EditorItem> _snapshot() => _items.map((item) => item.copy()).toList();
@@ -257,17 +284,31 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     setState(() => item.text = text);
   }
 
-  /// Entry point for the "edit existing text" toolbar action: tries to
-  /// read and edit the PDF's real text objects (preserving the original
-  /// font) first, and only falls back to the OCR-overlay approximation
-  /// when that isn't possible — the page has no extractable text (a scan
-  /// / image-only page), the document uses features this reader doesn't
-  /// support (encryption, exotic filters), or the replacement text
-  /// contains a character that was never embedded anywhere in this exact
-  /// font (CID/Type0 fonts, common for Korean body text, can only reuse
-  /// characters that already appear somewhere in the document under the
-  /// same font — see PdfFontInfo.encode).
-  Future<void> _editExistingText() async {
+  Future<List<PdfTextRun>> _extractRunsForCurrentPage() async {
+    List<PdfNativePage> nativePages;
+    try {
+      nativePages = await PdfNativeTextService.extractRuns(_currentFile);
+    } catch (_) {
+      nativePages = const [];
+    }
+    return nativePages
+        .where((page) => page.pageIndex == _pageIndex)
+        .expand((page) => page.runs)
+        .where((run) => run.text.trim().isNotEmpty)
+        .toList();
+  }
+
+  /// Toolbar toggle for direct on-page text editing: once active, tapping
+  /// a piece of text on the page itself edits it in place instead of
+  /// picking it out of a flat list first — much faster than hunting
+  /// through a long list when a page has a lot of text. The list picker
+  /// still exists as a fallback for the rare ambiguous tap (several runs
+  /// close together) or when nothing extractable was found under the tap.
+  Future<void> _toggleTextEditTapMode() async {
+    if (_textEditTapMode) {
+      setState(() => _textEditTapMode = false);
+      return;
+    }
     if (_pages.isEmpty) return;
     if (!_shownNativeEditNotice) {
       final proceed = await showExperimentalPdfNotice(
@@ -278,88 +319,141 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       _shownNativeEditNotice = true;
     }
     setState(() => _recognizing = true);
-    List<PdfNativePage> nativePages;
-    try {
-      nativePages = await PdfNativeTextService.extractRuns(_currentFile);
-    } catch (_) {
-      nativePages = const [];
-    } finally {
-      if (mounted) setState(() => _recognizing = false);
-    }
+    final runsOnPage = await _extractRunsForCurrentPage();
     if (!mounted) return;
-
-    final runsOnPage = nativePages
-        .where((page) => page.pageIndex == _pageIndex)
-        .expand((page) => page.runs)
-        .where((run) => run.text.trim().isNotEmpty)
-        .toList();
+    setState(() => _recognizing = false);
 
     if (runsOnPage.isEmpty) {
       await _recognizeExistingText();
       return;
     }
 
-    final selected = await showModalBottomSheet<PdfTextRun>(
-      context: context,
-      isScrollControlled: true,
-      builder: (sheetContext) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.6,
-        builder: (_, scrollController) => SafeArea(
-          child: Column(
-            children: [
-              const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text(
-                  '수정할 텍스트를 선택하세요 (원본 폰트 유지)',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  controller: scrollController,
-                  itemCount: runsOnPage.length,
-                  itemBuilder: (_, index) {
-                    final run = runsOnPage[index];
-                    final unreadable = run.text.contains('�');
-                    return ListTile(
-                      title: Text(run.text),
-                      subtitle: unreadable
-                          ? const Text(
-                              '이 폰트는 읽을 수 없어 OCR 방식으로 전환합니다',
-                              style: TextStyle(fontSize: 11),
-                            )
-                          : null,
-                      onTap: () => Navigator.pop(sheetContext, run),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    setState(() {
+      _textEditRunsOnPage = runsOnPage;
+      _textEditTapMode = true;
+      _selectedId = null;
+      _activeGizmoMode = null;
+      _drawingMode = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('수정할 텍스트를 화면에서 바로 탭하세요.')),
     );
-    if (selected == null || !mounted) return;
+  }
 
-    final newText = await _textDialog(
-      initialText: selected.text,
-      title: '텍스트 수정',
+  /// Hit-tests [tapNormX]/[tapNormY] (fraction of page width/height,
+  /// top-left origin — same convention as [EditorItem]) against the
+  /// currently cached text runs, using each run's approximate on-page
+  /// bounding box (real glyph-level layout isn't tracked, so this is an
+  /// axis-aligned estimate from the run's origin, font size, and advance
+  /// widths). Zero matches re-runs OCR-based recognition as a fallback;
+  /// more than one shows a short candidate list instead of guessing.
+  Future<void> _handlePageTapForTextEdit(
+    double tapNormX,
+    double tapNormY,
+  ) async {
+    final page = _pages[_pageIndex];
+    const tolerance = 0.01;
+    final candidates = _textEditRunsOnPage.where((run) {
+      final box = _approxRunBoxNormalized(run, page);
+      return tapNormX >= box.left - tolerance &&
+          tapNormX <= box.right + tolerance &&
+          tapNormY >= box.top - tolerance &&
+          tapNormY <= box.bottom + tolerance;
+    }).toList();
+
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('탭한 위치에서 편집 가능한 텍스트를 찾지 못했습니다.')),
+      );
+      return;
+    }
+
+    final run = candidates.length == 1
+        ? candidates.single
+        : await showModalBottomSheet<PdfTextRun>(
+            context: context,
+            isScrollControlled: true,
+            builder: (sheetContext) => SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text(
+                      '탭한 위치에 겹치는 텍스트가 여러 개입니다. 수정할 텍스트를 선택하세요.',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: candidates.length,
+                      itemBuilder: (_, index) => ListTile(
+                        title: Text(candidates[index].text),
+                        onTap: () => Navigator.pop(sheetContext, candidates[index]),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+    if (run == null || !mounted) return;
+    await _editRun(run);
+  }
+
+  ({double left, double top, double right, double bottom})
+  _approxRunBoxNormalized(PdfTextRun run, RenderedPdfPage page) {
+    final scale = run.ctm.yScale;
+    final glyphWidth = run.text.runes.fold<double>(
+      0,
+      (total, rune) => total + run.font.widthOf(String.fromCharCode(rune)),
     );
-    if (newText == null || newText.isEmpty || newText == selected.text) return;
+    final extraSpacing =
+        math.max(0, run.text.runes.length - 1) * run.charSpacing * scale;
+    final width =
+        glyphWidth / 1000 * run.fontSize * scale * (run.horizScalePercent / 100) +
+        extraSpacing;
+    final height = run.fontSize * scale;
+
+    final leftPdf = run.originX;
+    final bottomPdf = run.originY - height * 0.2;
+    final topPdf = bottomPdf + height * 1.2;
+    final rightPdf = leftPdf + math.max(width, height * 0.5);
+
+    return (
+      left: leftPdf / page.width,
+      top: 1 - topPdf / page.height,
+      right: rightPdf / page.width,
+      bottom: 1 - bottomPdf / page.height,
+    );
+  }
+
+  /// Shared replacement flow for a single text run — used by both the
+  /// on-page tap-to-edit path and (for now) nothing else, but kept
+  /// separate from the tap-hit-testing logic above since the two concerns
+  /// (finding the run vs. editing it) can fail independently.
+  Future<void> _editRun(PdfTextRun run) async {
+    final newText = await _textDialog(initialText: run.text, title: '텍스트 수정');
+    if (newText == null || newText.isEmpty || newText == run.text) return;
 
     setState(() => _recognizing = true);
     try {
       final result = await PdfNativeTextService.replaceRunText(
         file: _currentFile,
         pageIndex: _pageIndex,
-        run: selected,
+        run: run,
         newText: newText,
       );
       _currentFile = result.file;
       _hasNativeTextEdits = true;
+      // The edited run's own content stream was rewritten, so any other
+      // cached run offsets into that same stream are now stale — refresh
+      // before the next tap rather than risk editing against dead bytes.
+      final refreshedRuns = await _extractRunsForCurrentPage();
       await _load();
       if (mounted) {
+        setState(() => _textEditRunsOnPage = refreshedRuns);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -382,6 +476,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
           ),
         );
       }
+      setState(() => _textEditTapMode = false);
       await _recognizeExistingText();
       return;
     } catch (error) {
@@ -967,6 +1062,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                         _pageIndex = index;
                         _selectedId = null;
                         _activeGizmoMode = null;
+                        _textEditTapMode = false;
                         _activeStroke = [];
                       });
                       _resetView();
@@ -1011,8 +1107,9 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
             _insertTool(Icons.calendar_today_outlined, '날짜', _addDate),
             _insertTool(
               Icons.find_replace,
-              '텍스트 편집',
-              _recognizing ? () {} : _editExistingText,
+              _textEditTapMode ? '편집 종료' : '텍스트 편집',
+              _recognizing ? () {} : _toggleTextEditTapMode,
+              selected: _textEditTapMode,
             ),
             _insertTool(
               _drawingMode ? Icons.edit_off : Icons.draw,
@@ -1434,13 +1531,19 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                     height: pageHeight,
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
-                      onTap: () {
-                        if (!_drawingMode) {
-                          setState(() {
-                            _selectedId = null;
-                            _activeGizmoMode = null;
-                          });
+                      onTapUp: (details) {
+                        if (_drawingMode) return;
+                        if (_textEditTapMode) {
+                          _handlePageTapForTextEdit(
+                            details.localPosition.dx / pageSize.width,
+                            details.localPosition.dy / pageSize.height,
+                          );
+                          return;
                         }
+                        setState(() {
+                          _selectedId = null;
+                          _activeGizmoMode = null;
+                        });
                       },
                       onDoubleTap: _drawingMode ? null : _toggleZoom,
                       onPanStart: _drawingMode
@@ -1467,6 +1570,10 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                               child: Image.memory(page.bytes, fit: BoxFit.fill),
                             ),
                           ),
+                          if (!_drawingMode && !_textEditTapMode)
+                            ..._links
+                                .where((link) => link.pageIndex == index)
+                                .map((link) => _linkOverlay(link, pageSize)),
                           ...pageItems.map(
                             (item) => _itemWidget(item, pageSize),
                           ),
@@ -1536,6 +1643,49 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         );
       },
     );
+  }
+
+  Widget _linkOverlay(PdfLinkAnnotation link, Size pageSize) {
+    return Positioned(
+      left: link.rectX * pageSize.width,
+      top: link.rectY * pageSize.height,
+      width: link.rectWidth * pageSize.width,
+      height: link.rectHeight * pageSize.height,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _openLink(link),
+      ),
+    );
+  }
+
+  Future<void> _openLink(PdfLinkAnnotation link) async {
+    final destPageIndex = link.destPageIndex;
+    if (destPageIndex != null) {
+      if (destPageIndex < 0 || destPageIndex >= _pages.length) return;
+      setState(() {
+        _selectedId = null;
+        _activeGizmoMode = null;
+      });
+      if (_pageController.hasClients) {
+        _pageController.animateToPage(
+          destPageIndex,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeInOut,
+        );
+      }
+      return;
+    }
+    final uri = link.uri;
+    if (uri == null) return;
+    final parsed = Uri.tryParse(uri);
+    if (parsed == null) return;
+    if (!await launchUrl(parsed, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('링크를 열 수 없습니다.')));
+      }
+    }
   }
 
   Widget _itemWidget(EditorItem item, Size pageSize) {
