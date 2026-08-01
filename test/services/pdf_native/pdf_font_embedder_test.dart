@@ -7,6 +7,7 @@ import 'package:mobile_pdf_editor/services/pdf_native/pdf_document.dart';
 import 'package:mobile_pdf_editor/services/pdf_native/pdf_font_embedder.dart';
 import 'package:mobile_pdf_editor/services/pdf_native/pdf_incremental_writer.dart';
 import 'package:mobile_pdf_editor/services/pdf_native/pdf_native_edit_builder.dart';
+import 'package:mobile_pdf_editor/services/pdf_native/pdf_objects.dart';
 import 'package:mobile_pdf_editor/services/pdf_native/ttf_font_reader.dart';
 
 /// Same minimal CID-font fixture as pdf_native_cid_font_test.dart: a
@@ -160,4 +161,42 @@ void main() {
     expect(found!.resourceName, 'FBK0');
     expect(found.encode('바'), isNotNull);
   });
+
+  test(
+    'the embedded font carries real per-glyph widths (a /W array), not just a '
+    'uniform default — otherwise every character renders with identical, '
+    'monospaced-looking spacing regardless of its actual glyph shape',
+    () {
+      final pdfBytes = _buildCidFontPdf();
+      final doc = PdfDocument.parse(pdfBytes);
+      final page = doc.pages.single;
+
+      final built = buildEmbeddedFontWrites(
+        doc: doc,
+        page: page,
+        ttf: ttf,
+        resourceName: 'FBK0',
+      );
+      final edited = applyObjectWrites(doc, pdfBytes, built.writes);
+      final reparsed = PdfDocument.parse(edited);
+
+      final type0Dict = reparsed.getObject(built.font.fontRef);
+      final descendants = reparsed.resolve(
+        (type0Dict as PdfDictionaryObj)['DescendantFonts'],
+      );
+      final cidFontDict = reparsed.resolve(
+        (descendants as PdfArrayObj).items.first,
+      );
+      final wArray = reparsed.resolve((cidFontDict as PdfDictionaryObj)['W']);
+      expect(wArray, isA<PdfArrayObj>(), reason: 'a /W array must be present');
+      expect((wArray as PdfArrayObj).items, isNotEmpty);
+
+      // A narrow glyph (e.g. Latin 'i') and a wide one (a full-width
+      // Hangul syllable) must not report the same width — that's
+      // exactly what "monospaced-looking" means here.
+      final narrowWidth = built.font.widthOf('i');
+      final wideWidth = built.font.widthOf('가');
+      expect(narrowWidth, isNot(closeTo(wideWidth, 1)));
+    },
+  );
 }

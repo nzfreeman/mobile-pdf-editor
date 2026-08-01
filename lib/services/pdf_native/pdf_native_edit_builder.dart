@@ -77,7 +77,10 @@ Uint8List buildReplacementOperatorBytes(
     for (final rune in line.runes) {
       total += widthOf(String.fromCharCode(rune));
     }
-    return total / unitsPerEm * run.fontSize;
+    final glyphWidth = total / unitsPerEm * run.fontSize;
+    final spaceCount = ' '.allMatches(line).length;
+    final spacingWidth = run.charSpacing * line.length + run.wordSpacing * spaceCount;
+    return (glyphWidth + spacingWidth) * (run.horizScalePercent / 100);
   }
 
   final lines = _wrapLines(newText, wrapWidth, measureLine);
@@ -123,6 +126,14 @@ Uint8List buildReplacementOperatorBytes(
     ..writeln('0 0 0 rg')
     ..writeln('BT')
     ..writeln('/$fontResourceName ${_fmt(run.fontSize)} Tf')
+    // Replicate the original run's character/word spacing and horizontal
+    // scaling — without this, a replacement drawn with the defaults
+    // visibly mismatches the original's letter-spacing whenever the
+    // source PDF set non-default values (common for letter-spaced
+    // labels/headers).
+    ..writeln('${_fmt(run.charSpacing)} Tc')
+    ..writeln('${_fmt(run.wordSpacing)} Tw')
+    ..writeln('${_fmt(run.horizScalePercent)} Tz')
     ..writeln('${_fmt(run.originX)} ${_fmt(run.originY)} Td');
 
   final out = BytesBuilder();

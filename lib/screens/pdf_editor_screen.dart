@@ -58,6 +58,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   bool _loading = true;
   bool _exporting = false;
   bool _drawingMode = false;
+  Color _drawColor = Colors.black;
+  double _drawStrokeWidth = 3;
   bool _showMoreToolsIndicator = true;
   bool _resizingItem = false;
   bool _rotatingItem = false;
@@ -507,56 +509,11 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
   }
 
   Future<void> _addSignature() async {
-    final controller = SignatureController(
-      penStrokeWidth: 3,
-      penColor: Colors.black,
-      exportBackgroundColor: Colors.transparent,
-    );
     final bytes = await showModalBottomSheet<Uint8List>(
       context: context,
       isScrollControlled: true,
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                '서명',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                height: 220,
-                child: Signature(
-                  controller: controller,
-                  backgroundColor: Colors.white,
-                ),
-              ),
-              Row(
-                children: [
-                  TextButton(
-                    onPressed: controller.clear,
-                    child: const Text('지우기'),
-                  ),
-                  const Spacer(),
-                  FilledButton(
-                    onPressed: () async {
-                      final imageBytes = await controller.toPngBytes();
-                      if (sheetContext.mounted && imageBytes != null) {
-                        Navigator.pop(sheetContext, imageBytes);
-                      }
-                    },
-                    child: const Text('추가'),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+      builder: (_) => const _SignatureSheet(),
     );
-    controller.dispose();
     if (bytes != null) _addImageBytes(bytes, EditorItemType.signature);
   }
 
@@ -671,14 +628,30 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
 
   void _setSelectedColor(Color color) {
     final item = _selectedItem;
-    if (item == null) return;
+    if (item == null) {
+      // No item selected yet: if the user is mid-drawing-mode, treat
+      // this as choosing the pen color for the *next* stroke rather
+      // than a no-op — the color palette is already shown during
+      // drawing mode, so it should actually do something.
+      if (_drawingMode) setState(() => _drawColor = color);
+      return;
+    }
     _commit();
     setState(() => item.colorValue = color.toARGB32());
   }
 
   void _changeSelectedSize(double factor) {
     final item = _selectedItem;
-    if (item == null) return;
+    if (item == null) {
+      if (_drawingMode) {
+        setState(() {
+          _drawStrokeWidth = (_drawStrokeWidth * factor)
+              .clamp(1.0, 16.0)
+              .toDouble();
+        });
+      }
+      return;
+    }
     _commit();
     setState(() {
       if (item.type == EditorItemType.text) {
@@ -764,7 +737,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       width: width,
       height: height,
       points: localPoints,
-      strokeWidth: 3,
+      strokeWidth: _drawStrokeWidth,
+      colorValue: _drawColor.toARGB32(),
     );
     setState(() {
       _items.add(item);
@@ -1092,7 +1066,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                       (color) => Padding(
                         padding: const EdgeInsets.only(right: 8),
                         child: InkWell(
-                          onTap: selected == null
+                          onTap: selected == null && !_drawingMode
                               ? null
                               : () => _setSelectedColor(color),
                           customBorder: const CircleBorder(),
@@ -1103,7 +1077,12 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                               color: color,
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: selected?.colorValue == color.toARGB32()
+                                color:
+                                    (selected?.colorValue ??
+                                            (_drawingMode
+                                                ? _drawColor.toARGB32()
+                                                : null)) ==
+                                        color.toARGB32()
                                     ? Theme.of(context).colorScheme.primary
                                     : Colors.white,
                                 width: 3,
@@ -1119,6 +1098,19 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                         ),
                       ),
                     ),
+                  if (selected == null && _drawingMode) ...[
+                    const VerticalDivider(),
+                    _toolbarAction(
+                      icon: Icons.remove,
+                      label: '얇게',
+                      onTap: () => _changeSelectedSize(0.9),
+                    ),
+                    _toolbarAction(
+                      icon: Icons.add,
+                      label: '굵게',
+                      onTap: () => _changeSelectedSize(1.1),
+                    ),
+                  ],
                   if (selected != null) ...[
                     const VerticalDivider(),
                     _toolbarAction(
@@ -1444,8 +1436,8 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                                 child: CustomPaint(
                                   painter: _StrokePainter(
                                     _activeStroke,
-                                    Colors.black,
-                                    3,
+                                    _drawColor,
+                                    _drawStrokeWidth,
                                   ),
                                 ),
                               ),
@@ -1785,4 +1777,143 @@ class _StrokePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _StrokePainter oldDelegate) => true;
+}
+
+/// Signature pad with pen color/thickness controls. [SignatureController]'s
+/// `penColor`/`penStrokeWidth` are read-only after construction, so
+/// changing style mid-signature means rebuilding the controller — losing
+/// whatever was already drawn. Acceptable here (style changes are a rare,
+/// deliberate action before/between strokes, not something users do
+/// mid-stroke), and far simpler than maintaining a custom stroke-recording
+/// layer just to preserve content across a controller swap.
+class _SignatureSheet extends StatefulWidget {
+  const _SignatureSheet();
+
+  @override
+  State<_SignatureSheet> createState() => _SignatureSheetState();
+}
+
+class _SignatureSheetState extends State<_SignatureSheet> {
+  static const _palette = <Color>[
+    Colors.black,
+    Color(0xFFEF4444),
+    Color(0xFF3B82F6),
+    Color(0xFF22C55E),
+    Color(0xFF8B5CF6),
+  ];
+
+  Color _color = Colors.black;
+  double _strokeWidth = 3;
+  late SignatureController _controller = _buildController();
+
+  SignatureController _buildController() => SignatureController(
+    penStrokeWidth: _strokeWidth,
+    penColor: _color,
+    exportBackgroundColor: Colors.transparent,
+  );
+
+  void _updateStyle({Color? color, double? strokeWidth}) {
+    setState(() {
+      _color = color ?? _color;
+      _strokeWidth = strokeWidth ?? _strokeWidth;
+      _controller.dispose();
+      _controller = _buildController();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              '서명',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                for (final color in _palette)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: InkWell(
+                      onTap: () => _updateStyle(color: color),
+                      customBorder: const CircleBorder(),
+                      child: Container(
+                        width: 30,
+                        height: 30,
+                        decoration: BoxDecoration(
+                          color: color,
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: _color == color
+                                ? Theme.of(context).colorScheme.primary
+                                : Colors.white,
+                            width: 3,
+                          ),
+                          boxShadow: const [
+                            BoxShadow(color: Color(0x33000000), blurRadius: 2),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                const Spacer(),
+                IconButton(
+                  tooltip: '얇게',
+                  icon: const Icon(Icons.remove),
+                  onPressed: () => _updateStyle(
+                    strokeWidth: (_strokeWidth - 1).clamp(1.0, 10.0),
+                  ),
+                ),
+                Text('${_strokeWidth.round()}'),
+                IconButton(
+                  tooltip: '굵게',
+                  icon: const Icon(Icons.add),
+                  onPressed: () => _updateStyle(
+                    strokeWidth: (_strokeWidth + 1).clamp(1.0, 10.0),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 220,
+              child: Signature(
+                controller: _controller,
+                backgroundColor: Colors.white,
+              ),
+            ),
+            Row(
+              children: [
+                TextButton(
+                  onPressed: _controller.clear,
+                  child: const Text('지우기'),
+                ),
+                const Spacer(),
+                FilledButton(
+                  onPressed: () async {
+                    final imageBytes = await _controller.toPngBytes();
+                    if (context.mounted && imageBytes != null) {
+                      Navigator.pop(context, imageBytes);
+                    }
+                  },
+                  child: const Text('추가'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

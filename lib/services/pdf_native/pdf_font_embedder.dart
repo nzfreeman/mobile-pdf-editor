@@ -199,6 +199,11 @@ EmbeddedCidFont? findExistingEmbeddedFont(
     }),
     'FontDescriptor': descriptorRef,
     'DW': PdfNumber(defaultWidth * 1000 / ttf.unitsPerEm),
+    // Real per-glyph widths, not just the DW fallback: without this,
+    // every character (however narrow or wide its actual glyph) renders
+    // with identical advance width — visibly monospaced-looking,
+    // unnatural spacing regardless of the font's true letterforms.
+    'W': buildCidWidthsArray(ttf.gidAdvanceWidth, ttf.unitsPerEm),
     'CIDToGIDMap': const PdfName('Identity'),
   };
 
@@ -296,6 +301,31 @@ PdfObjectWrite buildPageResourceFontWrite({
 /// back to its Unicode code point. Only handles the BMP (single UTF-16
 /// code unit) — every character this app's fallback font actually needs
 /// to cover (Hangul + Latin) falls within that range.
+/// Builds a CIDFont `/W` array from per-glyph advance widths, using the
+/// compact `c [w1 w2 w3 ...]` form (consecutive GIDs starting at `c`) —
+/// since [gidAdvanceWidth] normally covers every GID contiguously from 0
+/// (see ttf_font_reader.dart's hmtx parsing), this typically collapses
+/// into a single big group rather than many small ones.
+PdfArrayObj buildCidWidthsArray(Map<int, int> gidAdvanceWidth, num unitsPerEm) {
+  final sortedGids = gidAdvanceWidth.keys.toList()..sort();
+  final items = <PdfObject>[];
+  var i = 0;
+  while (i < sortedGids.length) {
+    final startGid = sortedGids[i];
+    final widths = <PdfObject>[];
+    var expectedGid = startGid;
+    while (i < sortedGids.length && sortedGids[i] == expectedGid) {
+      final widthPdfUnits = gidAdvanceWidth[sortedGids[i]]! * 1000 / unitsPerEm;
+      widths.add(PdfNumber(widthPdfUnits.round()));
+      i++;
+      expectedGid++;
+    }
+    items.add(PdfNumber(startGid));
+    items.add(PdfArrayObj(widths));
+  }
+  return PdfArrayObj(items);
+}
+
 String buildToUnicodeCMapSource(Map<int, int> unicodeToGid) {
   final gidToUnicode = <int, int>{};
   for (final entry in unicodeToGid.entries) {

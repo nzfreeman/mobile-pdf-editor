@@ -73,6 +73,9 @@ class PdfTextRun {
     required this.originX,
     required this.originY,
     required this.text,
+    required this.charSpacing,
+    required this.wordSpacing,
+    required this.horizScalePercent,
     required this.ctm,
   });
 
@@ -94,6 +97,17 @@ class PdfTextRun {
   final double originY;
 
   final String text;
+
+  /// Character spacing (`Tc`), word spacing (`Tw`, applied only to
+  /// literal single-byte space codes per spec), and horizontal scaling
+  /// (`Tz`, as a percentage — 100 is unscaled) active when this run was
+  /// drawn. A replacement that ignores these and always draws with the
+  /// defaults will visibly mismatch the original's letter-spacing
+  /// whenever the source PDF used non-default values (common for
+  /// letter-spaced labels/headers).
+  final double charSpacing;
+  final double wordSpacing;
+  final double horizScalePercent;
 
   /// The CTM active when this run was drawn — needed to neutralize it via
   /// its inverse when splicing in replacement operators, so the
@@ -167,6 +181,9 @@ List<PdfTextRun> extractTextRuns(PdfDocument doc, PdfDictionaryObj page) {
   String? currentFontName;
   PdfFontInfo? currentFont;
   var currentFontSize = 0.0;
+  var charSpacing = 0.0;
+  var wordSpacing = 0.0;
+  var horizScalePercent = 100.0;
 
   final operands = <PdfObject>[];
   int? operatorStart;
@@ -181,8 +198,12 @@ List<PdfTextRun> extractTextRuns(PdfDocument doc, PdfDictionaryObj page) {
   void advanceTextMatrix(String shownText) {
     final font = currentFont;
     if (font == null) return;
-    final widthTextSpace =
+    final glyphWidth =
         font.measureWidth(shownText) / font.unitsPerEm * currentFontSize;
+    final spaceCount = ' '.allMatches(shownText).length;
+    final spacingWidth =
+        charSpacing * shownText.length + wordSpacing * spaceCount;
+    final widthTextSpace = (glyphWidth + spacingWidth) * (horizScalePercent / 100);
     textMatrix = Mat2D(1, 0, 0, 1, widthTextSpace, 0).multiply(textMatrix);
   }
 
@@ -209,6 +230,9 @@ List<PdfTextRun> extractTextRuns(PdfDocument doc, PdfDictionaryObj page) {
           originX: originX,
           originY: originY,
           text: text,
+          charSpacing: charSpacing * combined.yScale,
+          wordSpacing: wordSpacing * combined.yScale,
+          horizScalePercent: horizScalePercent,
           ctm: stack.last.ctm,
         ),
       );
@@ -301,6 +325,12 @@ List<PdfTextRun> extractTextRuns(PdfDocument doc, PdfDictionaryObj page) {
           currentFontSize = num_(operands[1]);
           currentFont = fontFor(currentFontName);
         }
+      case 'Tc':
+        if (operands.isNotEmpty) charSpacing = num_(operands[0]);
+      case 'Tw':
+        if (operands.isNotEmpty) wordSpacing = num_(operands[0]);
+      case 'Tz':
+        if (operands.isNotEmpty) horizScalePercent = num_(operands[0]);
       case 'Tm':
         if (operands.length >= 6) {
           lineMatrix = Mat2D(
