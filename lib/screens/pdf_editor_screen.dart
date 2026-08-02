@@ -1242,6 +1242,22 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     if (_zoomScale != 1) setState(() => _zoomScale = 1);
   }
 
+  Widget _zoomIconButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+  }) {
+    final color = Theme.of(context).colorScheme.onInverseSurface;
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 18, color: onPressed == null ? color.withValues(alpha: 0.35) : color),
+      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+      padding: EdgeInsets.zero,
+      splashRadius: 18,
+    );
+  }
+
   void _toggleZoom() {
     if (_zoomScale > 1.05) {
       _resetView();
@@ -1249,6 +1265,27 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     }
     _transformController.value = Matrix4.diagonal3Values(2.0, 2.0, 1.0);
     setState(() => _zoomScale = 2.0);
+  }
+
+  static const double _minZoomScale = 1.0;
+  static const double _maxZoomScale = 6.0;
+
+  /// Zoom in/out by [delta] around the viewport center — same
+  /// re-center-on-zoom simplification [_toggleZoom] already uses, rather
+  /// than preserving whatever point was under a finger (there isn't one
+  /// for a button tap anyway).
+  void _zoomByButton(double delta) {
+    final nextScale = (_zoomScale + delta).clamp(_minZoomScale, _maxZoomScale);
+    if (nextScale == _minZoomScale) {
+      _resetView();
+      return;
+    }
+    _transformController.value = Matrix4.diagonal3Values(
+      nextScale,
+      nextScale,
+      1.0,
+    );
+    setState(() => _zoomScale = nextScale.toDouble());
   }
 
   void _updateToolbarIndicator() {
@@ -1972,23 +2009,40 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                   context,
                 ).colorScheme.inverseSurface.withValues(alpha: 0.82),
                 borderRadius: BorderRadius.circular(18),
-                child: InkWell(
-                  onTap: _resetView,
-                  borderRadius: BorderRadius.circular(18),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 5,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _zoomIconButton(
+                      icon: Icons.remove,
+                      tooltip: '축소',
+                      onPressed: _zoomScale <= _minZoomScale
+                          ? null
+                          : () => _zoomByButton(-0.5),
                     ),
-                    child: Text(
-                      '${(_zoomScale * 100).round()}%',
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onInverseSurface,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
+                    InkWell(
+                      onTap: _resetView,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Text(
+                          '${(_zoomScale * 100).round()}%',
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onInverseSurface,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                    _zoomIconButton(
+                      icon: Icons.add,
+                      tooltip: '확대',
+                      onPressed: _zoomScale >= _maxZoomScale
+                          ? null
+                          : () => _zoomByButton(0.5),
+                    ),
+                  ],
                 ),
               ),
             ),
