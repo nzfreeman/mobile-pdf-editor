@@ -94,9 +94,9 @@ void main() {
   );
 
   test(
-    'a replacement only slightly wider than the original is condensed to '
-    'fit the original footprint instead of overflowing into whatever the '
-    'page draws next on that line (e.g. an adjacent table cell)',
+    'a replacement only slightly wider than the original is not '
+    'auto-compressed — letter-spacing stays under the caller\'s control, '
+    'not silently adjusted behind their back',
     () {
       final pdfBytes = _buildSimpleFontPdf(originalText: '345,678');
       final doc = PdfDocument.parse(pdfBytes);
@@ -120,13 +120,61 @@ void main() {
         reason: 'a one-character-longer replacement should not wrap to a second line',
       );
       expect(newRuns.single.text, '345,7689');
-      expect(
-        newRuns.single.horizScalePercent,
-        lessThan(100),
-        reason: 'the extra character should be fit via horizontal compression',
-      );
+      expect(newRuns.single.horizScalePercent, closeTo(100, 0.01));
     },
   );
+
+  test(
+    'an explicit manualHorizScalePercent condenses the replacement, for '
+    'callers (the editor\'s letter-spacing slider) that want it',
+    () {
+      final pdfBytes = _buildSimpleFontPdf(originalText: '345,678');
+      final doc = PdfDocument.parse(pdfBytes);
+      final run = extractTextRuns(doc, doc.pages.single).single;
+
+      final replacementOp = buildReplacementOperatorBytes(
+        run,
+        '345,7689',
+        manualHorizScalePercent: 80,
+      );
+      final edited = applyIncrementalEdits(doc, pdfBytes, [
+        PdfEdit(
+          streamRef: run.contentStreamRef,
+          start: run.byteStartInStream,
+          end: run.byteEndInStream,
+          replacement: replacementOp,
+        ),
+      ]);
+
+      final reparsed = PdfDocument.parse(edited);
+      final newRuns = extractTextRuns(reparsed, reparsed.pages.single);
+      expect(newRuns.single.horizScalePercent, closeTo(80, 0.01));
+    },
+  );
+
+  test('manualOffsetY shifts the replacement vertically off the original baseline', () {
+    final pdfBytes = _buildSimpleFontPdf(originalText: 'Hello');
+    final doc = PdfDocument.parse(pdfBytes);
+    final run = extractTextRuns(doc, doc.pages.single).single;
+
+    final replacementOp = buildReplacementOperatorBytes(
+      run,
+      'Bye',
+      manualOffsetY: 5,
+    );
+    final edited = applyIncrementalEdits(doc, pdfBytes, [
+      PdfEdit(
+        streamRef: run.contentStreamRef,
+        start: run.byteStartInStream,
+        end: run.byteEndInStream,
+        replacement: replacementOp,
+      ),
+    ]);
+
+    final reparsed = PdfDocument.parse(edited);
+    final newRuns = extractTextRuns(reparsed, reparsed.pages.single);
+    expect(newRuns.single.originY, closeTo(run.originY + 5, 0.01));
+  });
 
   test('a replacement no longer than the original stays on one line', () {
     final pdfBytes = _buildSimpleFontPdf(originalText: 'Hello');

@@ -526,21 +526,23 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     // locates the run by its original byte offsets, which stop being
     // valid the moment that content stream is rewritten once.
     final baseFile = _currentFile;
-    var offsetX = 0.0;
-    final applied = await _applyRunReplacement(run, newText, baseFile, offsetX);
+    final adjustment = _RunAdjustment(
+      horizScalePercent: run.horizScalePercent.clamp(50, 150).toDouble(),
+    );
+    final applied = await _applyRunReplacement(run, newText, baseFile, adjustment);
     if (applied == null || !mounted) return;
 
-    await _adjustRunPositionSheet(run, newText, baseFile, offsetX);
+    await _adjustRunPositionSheet(run, newText, baseFile, adjustment);
   }
 
   /// Runs [PdfNativeTextService.replaceRunText] and folds in the shared
   /// success/failure handling (snackbars, OCR fallback, page reload) used
-  /// by both the initial edit and any manual position nudges.
+  /// by both the initial edit and any manual nudges.
   Future<({bool usedFallbackFont})?> _applyRunReplacement(
     PdfTextRun run,
     String newText,
     File baseFile,
-    double offsetX,
+    _RunAdjustment adjustment,
   ) async {
     setState(() => _recognizing = true);
     try {
@@ -549,7 +551,9 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         pageIndex: _pageIndex,
         run: run,
         newText: newText,
-        manualOffsetX: offsetX,
+        manualOffsetX: adjustment.offsetX,
+        manualOffsetY: adjustment.offsetY,
+        manualHorizScalePercent: adjustment.horizScalePercent,
       );
       _currentFile = result.file;
       _hasNativeTextEdits = true;
@@ -598,26 +602,27 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     }
   }
 
-  /// Follow-up bottom sheet offering a manual left/right nudge on top of
-  /// the automatic fit — each tap re-applies the edit from [baseFile] so
-  /// nudges don't stack on top of a moving target. Returns the final
-  /// offset applied (0 if the user made no changes).
-  Future<double?> _adjustRunPositionSheet(
+  /// Follow-up bottom sheet for manually fine-tuning a just-applied native
+  /// text edit: nudge left/right/up/down, and a letter-spacing (Tz)
+  /// slider — nothing here is automatic, since auto-condensing the text
+  /// behind the user's back turned out to be more surprising than
+  /// helpful. Every change re-applies the edit fresh from [baseFile] so
+  /// adjustments don't compound on top of a moving target.
+  Future<void> _adjustRunPositionSheet(
     PdfTextRun run,
     String newText,
     File baseFile,
-    double initialOffsetX,
+    _RunAdjustment adjustment,
   ) async {
-    var offsetX = initialOffsetX;
     const step = 2.0;
-    return showModalBottomSheet<double>(
+    await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) {
-          Future<void> nudge(double delta) async {
-            offsetX += delta;
+          Future<void> apply() async {
             setSheetState(() {});
-            await _applyRunReplacement(run, newText, baseFile, offsetX);
+            await _applyRunReplacement(run, newText, baseFile, adjustment);
           }
 
           return SafeArea(
@@ -627,7 +632,7 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    '자동으로 맞춘 위치가 마음에 들지 않으면 좌우로 미세 조정할 수 있습니다.',
+                    '위치와 글자 간격을 직접 조정할 수 있습니다.',
                     style: TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 12),
@@ -635,19 +640,64 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       IconButton.filledTonal(
-                        onPressed: () => nudge(-step),
+                        tooltip: '왼쪽으로',
+                        onPressed: () {
+                          adjustment.offsetX -= step;
+                          apply();
+                        },
                         icon: const Icon(Icons.chevron_left),
                       ),
-                      const SizedBox(width: 16),
                       IconButton.filledTonal(
-                        onPressed: () => nudge(step),
+                        tooltip: '오른쪽으로',
+                        onPressed: () {
+                          adjustment.offsetX += step;
+                          apply();
+                        },
                         icon: const Icon(Icons.chevron_right),
+                      ),
+                      const SizedBox(width: 24),
+                      IconButton.filledTonal(
+                        tooltip: '위로',
+                        onPressed: () {
+                          adjustment.offsetY += step;
+                          apply();
+                        },
+                        icon: const Icon(Icons.keyboard_arrow_up),
+                      ),
+                      IconButton.filledTonal(
+                        tooltip: '아래로',
+                        onPressed: () {
+                          adjustment.offsetY -= step;
+                          apply();
+                        },
+                        icon: const Icon(Icons.keyboard_arrow_down),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      const Icon(Icons.text_fields, size: 20),
+                      Expanded(
+                        child: Slider(
+                          min: 50,
+                          max: 150,
+                          divisions: 100,
+                          label: '${adjustment.horizScalePercent.round()}%',
+                          value: adjustment.horizScalePercent,
+                          onChanged: (value) {
+                            adjustment.horizScalePercent = value;
+                            setSheetState(() {});
+                          },
+                          onChangeEnd: (_) => apply(),
+                        ),
+                      ),
+                      Text('${adjustment.horizScalePercent.round()}%'),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
                   FilledButton(
-                    onPressed: () => Navigator.pop(sheetContext, offsetX),
+                    onPressed: () => Navigator.pop(sheetContext),
                     child: const Text('완료'),
                   ),
                 ],
@@ -2272,6 +2322,15 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
       ),
     );
   }
+}
+
+/// Mutable holder for the manual x/y/letter-spacing nudges applied to a
+/// single in-progress native text-run edit (see [_PdfEditorScreenState._editRun]).
+class _RunAdjustment {
+  _RunAdjustment({this.horizScalePercent = 100});
+  double offsetX = 0;
+  double offsetY = 0;
+  double horizScalePercent;
 }
 
 class _StrokePainter extends CustomPainter {

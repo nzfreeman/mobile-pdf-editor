@@ -1,7 +1,7 @@
 name: mobile_pdf_editor
 description: Multi-page Flutter PDF editor with drawing, images, stamps, undo/redo and PDF utilities.
 publish_to: 'none'
-version: 0.15.0+28
+version: 0.16.0+29
 
 environment:
   sdk: '>=3.12.0 <4.0.0'

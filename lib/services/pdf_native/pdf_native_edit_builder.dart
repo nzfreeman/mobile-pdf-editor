@@ -40,9 +40,18 @@ Uint8List buildReplacementOperatorBytes(
   /// other content nearby, or the page's other runs weren't available).
   double? availableWidthOverride,
   /// Manual horizontal nudge (page-space points, positive = right) on
-  /// top of the run's original origin — lets a user who isn't happy with
-  /// the automatic fit shift the replacement themselves.
+  /// top of the run's original origin.
   double manualOffsetX = 0,
+  /// Manual vertical nudge (page-space points, positive = up, matching
+  /// PDF's y-up user space) on top of the run's original origin.
+  double manualOffsetY = 0,
+  /// Horizontal scaling (`Tz`, percent — 100 is unscaled) to draw the
+  /// replacement with. Defaults to the original run's own scale — no
+  /// automatic compression is applied; a caller who wants the text
+  /// condensed to fit some available width sets this explicitly (see the
+  /// editor's letter-spacing slider), since auto-condensing behind the
+  /// user's back proved surprising in practice.
+  double? manualHorizScalePercent,
 }) {
   double Function(String) widthOf = run.font.widthOf;
   double unitsPerEm = run.font.unitsPerEm;
@@ -97,36 +106,12 @@ Uint8List buildReplacementOperatorBytes(
     return (glyphWidth + spacingWidth) * (horizScalePercent / 100);
   }
 
+  final effectiveHorizScalePercent =
+      manualHorizScalePercent ?? run.horizScalePercent;
   double measureLine(String line) =>
-      measureLineAtScale(line, run.horizScalePercent);
-
-  // A same-line replacement that's only modestly wider than the original
-  // (e.g. one extra digit in a number) is squeezed horizontally to still
-  // fit within the original footprint, rather than growing past it —
-  // growing risks overlapping whatever else the page draws immediately
-  // to the right on the same line (a neighboring table cell, another
-  // field, ...), since replacing this run's operator doesn't move
-  // anything else already positioned on the page. Only when even
-  // aggressive compression wouldn't be legible does this fall back to
-  // wrapping across lines instead.
-  const minCondensedScalePercent = 55.0;
-  var effectiveHorizScalePercent = run.horizScalePercent;
-  final singleLineText = newText.replaceAll('\n', ' ');
-  if (!newText.contains('\n')) {
-    final naturalWidth = measureLine(singleLineText);
-    if (naturalWidth > fitWidth && fitWidth > 0) {
-      final requiredScale = run.horizScalePercent * (fitWidth / naturalWidth);
-      if (requiredScale >= minCondensedScalePercent) {
-        effectiveHorizScalePercent = requiredScale;
-      }
-    }
-  }
-  double measureLineEffective(String line) =>
       measureLineAtScale(line, effectiveHorizScalePercent);
 
-  final lines = effectiveHorizScalePercent != run.horizScalePercent
-      ? [singleLineText]
-      : _wrapLines(newText, wrapWidth, measureLine);
+  final lines = _wrapLines(newText, wrapWidth, measureLine);
   final encodedLines = <Uint8List>[];
   for (final line in lines) {
     final encoded = encodeLine(line);
@@ -146,24 +131,30 @@ Uint8List buildReplacementOperatorBytes(
   final descent = run.fontSize * 0.25;
   final ascent = run.fontSize * 0.9;
   final lineHeight = run.fontSize * 1.15;
-  final lineWidths = lines.map(measureLineEffective).toList();
+  final lineWidths = lines.map(measureLine).toList();
   final maxLineWidth = lineWidths.isEmpty
       ? wrapWidth
       : lineWidths.reduce(math.max);
 
   final newOriginX = run.originX + manualOffsetX;
+  final newOriginY = run.originY + manualOffsetY;
   // The mask must cover both the original glyphs (so they don't show
   // through) and wherever the new text actually lands — which can differ
-  // from the original origin once [manualOffsetX] shifts it.
+  // from the original origin once manual offsets shift it.
   final maskLeft = math.min(run.originX, newOriginX);
   final maskRight = math.max(
     run.originX + originalWidth,
     newOriginX + maxLineWidth,
   );
+  final maskBottom = math.min(
+    run.originY - descent,
+    newOriginY - descent - lineHeight * (lines.length - 1),
+  );
+  final maskTop = math.max(run.originY + ascent, newOriginY + ascent);
   final rectX = maskLeft;
-  final rectY = run.originY - descent - lineHeight * (lines.length - 1);
+  final rectY = maskBottom;
   final rectWidth = math.max(maskRight - maskLeft, run.fontSize);
-  final rectHeight = descent + ascent + lineHeight * (lines.length - 1);
+  final rectHeight = math.max(maskTop - maskBottom, run.fontSize);
 
   final buffer = StringBuffer()
     ..writeln('q')
@@ -186,7 +177,7 @@ Uint8List buildReplacementOperatorBytes(
     ..writeln('${_fmt(run.charSpacing)} Tc')
     ..writeln('${_fmt(run.wordSpacing)} Tw')
     ..writeln('${_fmt(effectiveHorizScalePercent)} Tz')
-    ..writeln('${_fmt(newOriginX)} ${_fmt(run.originY)} Td');
+    ..writeln('${_fmt(newOriginX)} ${_fmt(newOriginY)} Td');
 
   final out = BytesBuilder();
   out.add(buffer.toString().codeUnits);

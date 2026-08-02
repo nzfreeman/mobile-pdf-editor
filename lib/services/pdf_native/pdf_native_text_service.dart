@@ -69,6 +69,8 @@ class PdfNativeTextService {
     required PdfTextRun run,
     required String newText,
     double manualOffsetX = 0,
+    double manualOffsetY = 0,
+    double? manualHorizScalePercent,
   }) async {
     final bytes = await file.readAsBytes();
     final doc = PdfDocument.parse(bytes);
@@ -92,6 +94,8 @@ class PdfNativeTextService {
         newText,
         availableWidthOverride: availableWidthOverride,
         manualOffsetX: manualOffsetX,
+        manualOffsetY: manualOffsetY,
+        manualHorizScalePercent: manualHorizScalePercent,
       );
     } else {
       final ttf = await _loadFallbackTtf();
@@ -112,6 +116,8 @@ class PdfNativeTextService {
         fallbackFont: embedded,
         availableWidthOverride: availableWidthOverride,
         manualOffsetX: manualOffsetX,
+        manualOffsetY: manualOffsetY,
+        manualHorizScalePercent: manualHorizScalePercent,
       );
     }
 
