@@ -347,9 +347,12 @@ class PdfService {
       case EditorItemType.text:
         child = pw.Text(
           item.text ?? '',
+          textAlign: _pdfTextAlign(item.textAlign),
           style: pw.TextStyle(
             fontSize: item.fontSize,
             color: pdf_core.PdfColor.fromInt(item.colorValue),
+            fontWeight: item.bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+            fontStyle: item.italic ? pw.FontStyle.italic : pw.FontStyle.normal,
           ),
         );
         break;
@@ -372,7 +375,15 @@ class PdfService {
         child = pw.Container(
           color: pdf_core.PdfColor.fromInt(item.colorValue),
           padding: const pw.EdgeInsets.all(4),
-          child: pw.Text(item.text ?? '', style: const pw.TextStyle(fontSize: 9)),
+          child: pw.Text(
+            item.text ?? '',
+            textAlign: _pdfTextAlign(item.textAlign),
+            style: pw.TextStyle(
+              fontSize: 9,
+              fontWeight: item.bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+              fontStyle: item.italic ? pw.FontStyle.italic : pw.FontStyle.normal,
+            ),
+          ),
         );
         break;
       case EditorItemType.link:
@@ -433,6 +444,13 @@ class PdfService {
     );
   }
 }
+
+pw.TextAlign _pdfTextAlign(ui.TextAlign align) => switch (align) {
+  ui.TextAlign.center => pw.TextAlign.center,
+  ui.TextAlign.right => pw.TextAlign.right,
+  ui.TextAlign.justify => pw.TextAlign.justify,
+  _ => pw.TextAlign.left,
+};
 
 /// Name shared between the [pw.Anchor] placed on every exported page and
 /// any [pw.Link] targeting it by page index — must match exactly since

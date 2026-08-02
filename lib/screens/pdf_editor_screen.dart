@@ -1069,6 +1069,41 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     setState(() => item.colorValue = color.toARGB32());
   }
 
+  void _toggleSelectedBold() {
+    final item = _selectedItem;
+    if (item == null) return;
+    _commit();
+    setState(() => item.bold = !item.bold);
+  }
+
+  void _toggleSelectedItalic() {
+    final item = _selectedItem;
+    if (item == null) return;
+    _commit();
+    setState(() => item.italic = !item.italic);
+  }
+
+  static const _textAlignCycle = [
+    TextAlign.left,
+    TextAlign.center,
+    TextAlign.right,
+  ];
+
+  void _cycleSelectedTextAlign() {
+    final item = _selectedItem;
+    if (item == null) return;
+    _commit();
+    final nextIndex =
+        (_textAlignCycle.indexOf(item.textAlign) + 1) % _textAlignCycle.length;
+    setState(() => item.textAlign = _textAlignCycle[nextIndex]);
+  }
+
+  IconData _textAlignIcon(TextAlign align) => switch (align) {
+    TextAlign.center => Icons.format_align_center,
+    TextAlign.right => Icons.format_align_right,
+    _ => Icons.format_align_left,
+  };
+
   void _changeSelectedSize(double factor) {
     final item = _selectedItem;
     if (item == null) {
@@ -1609,12 +1644,30 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
                       onTap: _duplicateSelected,
                     ),
                     if (selected.type == EditorItemType.text ||
-                        selected.type == EditorItemType.memo)
+                        selected.type == EditorItemType.memo) ...[
                       _toolbarAction(
                         icon: Icons.edit,
                         label: '수정',
                         onTap: () => _editText(selected),
                       ),
+                      _toolbarAction(
+                        icon: Icons.format_bold,
+                        label: '굵게',
+                        active: selected.bold,
+                        onTap: () => _toggleSelectedBold(),
+                      ),
+                      _toolbarAction(
+                        icon: Icons.format_italic,
+                        label: '기울임',
+                        active: selected.italic,
+                        onTap: () => _toggleSelectedItalic(),
+                      ),
+                      _toolbarAction(
+                        icon: _textAlignIcon(selected.textAlign),
+                        label: '정렬',
+                        onTap: () => _cycleSelectedTextAlign(),
+                      ),
+                    ],
                     if (selected.type == EditorItemType.link) ...[
                       _toolbarAction(
                         icon: Icons.edit,
@@ -1699,9 +1752,12 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
     required String label,
     required VoidCallback onTap,
     bool danger = false,
+    bool active = false,
   }) {
     final color = danger
         ? Theme.of(context).colorScheme.error
+        : active
+        ? Theme.of(context).colorScheme.primary
         : Theme.of(context).colorScheme.onSurface;
     return InkWell(
       onTap: onTap,
@@ -2106,9 +2162,12 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         alignment: Alignment.topLeft,
         child: Text(
           item.text ?? '',
+          textAlign: item.textAlign,
           style: TextStyle(
             fontSize: item.fontSize,
             color: Color(item.colorValue),
+            fontWeight: item.bold ? FontWeight.bold : FontWeight.normal,
+            fontStyle: item.italic ? FontStyle.italic : FontStyle.normal,
           ),
         ),
       );
@@ -2132,7 +2191,13 @@ class _PdfEditorScreenState extends State<PdfEditorScreen> {
         padding: const EdgeInsets.all(6),
         child: Text(
           item.text ?? '',
-          style: const TextStyle(fontSize: 12, color: Colors.black87),
+          textAlign: item.textAlign,
+          style: TextStyle(
+            fontSize: 12,
+            color: Colors.black87,
+            fontWeight: item.bold ? FontWeight.bold : FontWeight.normal,
+            fontStyle: item.italic ? FontStyle.italic : FontStyle.normal,
+          ),
         ),
       );
     } else if (item.type == EditorItemType.link) {

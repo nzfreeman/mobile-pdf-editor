@@ -41,6 +41,9 @@ class EditorItem {
     this.colorValue = 0xFF000000,
     this.linkUrl,
     this.linkTargetPage,
+    this.bold = false,
+    this.italic = false,
+    this.textAlign = TextAlign.left,
   });
 
   final String id;
@@ -66,6 +69,11 @@ class EditorItem {
   /// [EditorItemType.link] item.
   int? linkTargetPage;
 
+  /// Styling for [EditorItemType.text]/[EditorItemType.memo] items.
+  bool bold;
+  bool italic;
+  TextAlign textAlign;
+
   EditorItem copy() => copyWith();
 
   EditorItem copyWith({
@@ -84,6 +92,9 @@ class EditorItem {
     int? colorValue,
     String? linkUrl,
     int? linkTargetPage,
+    bool? bold,
+    bool? italic,
+    TextAlign? textAlign,
   }) {
     return EditorItem(
       id: id ?? this.id,
@@ -104,6 +115,9 @@ class EditorItem {
       colorValue: colorValue ?? this.colorValue,
       linkUrl: linkUrl ?? this.linkUrl,
       linkTargetPage: linkTargetPage ?? this.linkTargetPage,
+      bold: bold ?? this.bold,
+      italic: italic ?? this.italic,
+      textAlign: textAlign ?? this.textAlign,
     );
   }
 }
